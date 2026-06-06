@@ -1,0 +1,12 @@
+[package]
+name = "tape-decode"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+num-traits = "0.2"
+rustfft = "6"
+sci-rs = "0.4"
+serde = { version = "1", features = ["derive"] }
+tracing = "0.1"

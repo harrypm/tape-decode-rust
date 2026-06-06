@@ -1,0 +1,13 @@
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+    "-C", "target-feature=+crt-static",
+    "-C", "link-arg=-fuse-ld=lld-link",
+    "-C", "link-args=/cetcompat /BREPRO /FILEALIGN:0x1000 /OPT:REF /OPT:ICF=10 /DEPENDENTLOADFLAG:0x4000",
+]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = [
+    "-C", "target-feature=+crt-static",
+    "-C", "link-arg=-fuse-ld=lld-link",
+    "-C", "link-args=/BREPRO /FILEALIGN:0x1000 /OPT:REF /OPT:ICF=10 /DEPENDENTLOADFLAG:0x4000",
+]

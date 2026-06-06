@@ -1,0 +1,98 @@
+name: Build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows (x86-64 v1-v4)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add x86_64-pc-windows-msvc
+          rustup default stable
+
+      - name: Build all microarchitecture levels
+        shell: pwsh
+        run: |
+          $levels = @{
+            "x86-64-v1" = "x86-64"
+            "x86-64-v2" = "x86-64-v2"
+            "x86-64-v3" = "x86-64-v3"
+            "x86-64-v4" = "x86-64-v4"
+          }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          foreach ($name in $levels.Keys) {
+            $cpu = $levels[$name]
+            Write-Host "Building $name (target-cpu=$cpu)"
+            $env:RUSTFLAGS = "-C target-cpu=$cpu"
+            $env:CARGO_TARGET_DIR = "target-$name"
+            cargo build --release --target x86_64-pc-windows-msvc --bin tape-decode
+            if ($LASTEXITCODE -ne 0) { throw "build failed for $name" }
+            New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
+            Copy-Item "target-$name/x86_64-pc-windows-msvc/release/tape-decode.exe" "dist/$name/tape-decode.exe"
+          }
+
+      - name: Package windows.zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/* -DestinationPath windows.zip -Force
+
+      - name: Upload windows.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: windows.zip
+
+  linux:
+    name: Oracle Linux 8 (x86-64 v1-v4)
+    runs-on: ubuntu-latest
+    container:
+      image: oraclelinux:8
+    steps:
+      - name: Install build dependencies
+        run: |
+          dnf -y install gcc make zip tar findutils which
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build all microarchitecture levels
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          declare -A levels=(
+            ["x86-64-v1"]="x86-64"
+            ["x86-64-v2"]="x86-64-v2"
+            ["x86-64-v3"]="x86-64-v3"
+            ["x86-64-v4"]="x86-64-v4"
+          )
+          mkdir -p dist
+          for name in "${!levels[@]}"; do
+            cpu="${levels[$name]}"
+            echo "Building $name (target-cpu=$cpu)"
+            RUSTFLAGS="-C target-cpu=$cpu" CARGO_TARGET_DIR="target-$name" \
+              cargo build --release --target x86_64-unknown-linux-gnu --bin tape-decode
+            mkdir -p "dist/$name"
+            cp "target-$name/x86_64-unknown-linux-gnu/release/tape-decode" "dist/$name/tape-decode"
+          done
+
+      - name: Package linux.zip
+        run: |
+          set -euo pipefail
+          cd dist && zip -r ../linux.zip . && cd ..
+
+      - name: Upload linux.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: linux.zip

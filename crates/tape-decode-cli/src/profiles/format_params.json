@@ -1,0 +1,783 @@
+{
+  "BETAMAX": {
+    "decode_options": {
+      "chroma_afc_fine_tune_fh_ratio": 0.5,
+      "use_fsc_notch_filter": true
+    },
+    "decoder_params": {
+      "boost_bpf": {
+        "mult": 1.0
+      },
+      "boost_ramp": null,
+      "chroma_audio_notch_freq": 0.0,
+      "chroma_bpf_lower": 60000.0,
+      "chroma_bpf_order": 4,
+      "chroma_offset": 5.0,
+      "deemph": {
+        "q": 0.5
+      },
+      "fm_audio_channels": null,
+      "nonlinear": {
+        "amp_lpf_freq": 700000.0,
+        "bandpass_order": 1,
+        "bandpass_upper": 4500000.0,
+        "highpass_limit_h": 5000.0,
+        "highpass_limit_l": -20000.0,
+        "logistic": null,
+        "scaling_2": null,
+        "use_sub_deemphasis": true
+      },
+      "video_custom_luma_filters": null,
+      "video_eq": {
+        "loband": {
+          "corner": 2620000.0,
+          "order_limit": 20,
+          "transition": 500000.0
+        }
+      },
+      "video_hpf_extra": 1320000.0,
+      "video_lpf_order": 6,
+      "video_lpf_supergauss": false,
+      "video_rf_peak": null
+    }
+  },
+  "BETAMAX_HIFI": {
+    "base": "BETAMAX",
+    "decoder_params": {
+      "boost_bpf": {
+        "high": 5600000.0,
+        "low": 4300000.0
+      },
+      "chroma_bpf_order": 8,
+      "chroma_bpf_upper": 1100000.0,
+      "chroma_rotation": [
+        2,
+        0
+      ],
+      "color_under_carrier": 688374.125874126,
+      "deemph": {
+        "gain": 8.0,
+        "mid": 100000.0
+      },
+      "nonlinear": {
+        "exp_scaling": 0.37,
+        "highpass_freq": 325000.0,
+        "scaling_1": null,
+        "static_factor": 0.16
+      },
+      "video_bpf": {
+        "high": 5880000.0,
+        "order": 1
+      },
+      "video_hpf_extra": 2000000.0,
+      "video_hpf_extra_order": 12,
+      "video_lpf_extra": 6010000.0,
+      "video_lpf_extra_order": 3,
+      "video_lpf_freq": 3000000.0
+    }
+  },
+  "EIAJ": {
+    "decode_options": {
+      "fallback_vsync": true
+    },
+    "decoder_params": {
+      "boost_bpf": {
+        "high": 6000000.0,
+        "low": 5400000.0,
+        "mult": 0.0
+      },
+      "boost_ramp": null,
+      "chroma_audio_notch_freq": 0.0,
+      "chroma_bpf_lower": 60000.0,
+      "chroma_bpf_order": 4,
+      "chroma_bpf_upper": 1300000.0,
+      "chroma_offset": 5.0,
+      "chroma_rotation": null,
+      "color_under_carrier": 685546.875,
+      "deemph": {
+        "gain": 10.0,
+        "mid": 360000.0,
+        "q": 0.5
+      },
+      "fm_audio_channels": null,
+      "nonlinear": {
+        "amp_lpf_freq": 700000.0,
+        "bandpass_order": 1,
+        "bandpass_upper": null,
+        "exp_scaling": 0.25,
+        "highpass_freq": 1000000.0,
+        "highpass_limit_h": 5000.0,
+        "highpass_limit_l": -20000.0,
+        "logistic": null,
+        "scaling_1": null,
+        "scaling_2": null,
+        "static_factor": null,
+        "use_sub_deemphasis": false
+      },
+      "video_bpf": {
+        "high": 6700000.0,
+        "order": 1
+      },
+      "video_custom_luma_filters": null,
+      "video_eq": {
+        "loband": {
+          "corner": 2620000.0,
+          "order_limit": 20,
+          "transition": 500000.0
+        }
+      },
+      "video_hpf_extra": 1500000.0,
+      "video_hpf_extra_order": 1,
+      "video_lpf_extra": 6900000.0,
+      "video_lpf_extra_order": 3,
+      "video_lpf_freq": 3000000.0,
+      "video_lpf_order": 6,
+      "video_lpf_supergauss": false,
+      "video_rf_peak": null
+    }
+  },
+  "HI8": {
+    "base": "VIDEO8",
+    "decode_options": {
+      "fm_audio_notch": 1.0
+    },
+    "decoder_params": {
+      "boost_bpf": {
+        "high": 7800000.0,
+        "low": 7200000.0,
+        "mult": 0.0
+      },
+      "deemph": {
+        "mid": 760000.0,
+        "q": 0.5
+      },
+      "nonlinear": {
+        "highpass_freq": 260000.0,
+        "highpass_limit_h": 0.0,
+        "highpass_limit_l": 0.0
+      },
+      "video_hpf_extra": 1850000.0,
+      "video_hpf_extra_order": 16,
+      "video_lpf_extra_order": 16,
+      "video_lpf_freq": 5000000.0,
+      "video_rf_peak": {
+        "bandwidth": 20000000.0,
+        "freq": 6.7
+      }
+    }
+  },
+  "QUADRUPLEX": {
+    "decoder_params": {
+      "boost_bpf": {
+        "high": 10000000.0,
+        "low": 9500000.0,
+        "mult": 0.0
+      },
+      "boost_ramp": null,
+      "chroma_audio_notch_freq": 0.0,
+      "chroma_bpf_lower": 60000.0,
+      "chroma_bpf_order": 4,
+      "chroma_bpf_upper": 100000.0,
+      "chroma_offset": 5.0,
+      "chroma_rotation": null,
+      "color_under_carrier": 4430000.0,
+      "deemph": {
+        "gain": 9.53,
+        "mid": 478500.0,
+        "q": 0.5
+      },
+      "fm_audio_channels": null,
+      "nonlinear": {
+        "amp_lpf_freq": 700000.0,
+        "bandpass_order": 1,
+        "bandpass_upper": null,
+        "exp_scaling": 0.25,
+        "highpass_freq": 1000000.0,
+        "highpass_limit_h": 5000.0,
+        "highpass_limit_l": -20000.0,
+        "logistic": null,
+        "scaling_1": null,
+        "scaling_2": null,
+        "static_factor": null,
+        "use_sub_deemphasis": false
+      },
+      "video_custom_luma_filters": null,
+      "video_eq": {
+        "loband": {
+          "corner": 2620000.0,
+          "order_limit": 20,
+          "transition": 500000.0
+        }
+      },
+      "video_hpf_extra": 500000.0,
+      "video_lpf_freq": 5200000.0,
+      "video_lpf_order": 6,
+      "video_lpf_supergauss": false,
+      "video_rf_peak": null
+    }
+  },
+  "SUPERBETA": {
+    "base": "BETAMAX",
+    "decode_options": {
+      "use_fsc_notch_filter": false
+    },
+    "decoder_params": {
+      "boost_bpf": {
+        "high": 5600000.0,
+        "low": 4300000.0
+      },
+      "boost_ramp": {
+        "rf_linear_0": 0.0,
+        "rf_linear_20": 1.0,
+        "start_freq": 0.0
+      },
+      "chroma_bpf_order": 8,
+      "chroma_bpf_upper": 1100000.0,
+      "chroma_rotation": [
+        2,
+        0
+      ],
+      "color_under_carrier": 688374.125874126,
+      "deemph": {
+        "gain": 8.0,
+        "mid": 100000.0
+      },
+      "nonlinear": {
+        "exp_scaling": 0.37,
+        "highpass_freq": 325000.0,
+        "scaling_1": null,
+        "static_factor": 0.16
+      },
+      "video_bpf": null,
+      "video_hpf_extra": 2000000.0,
+      "video_hpf_extra_order": 20,
+      "video_lpf_extra": 7650000.0,
+      "video_lpf_extra_order": 15,
+      "video_lpf_freq": 4000000.0,
+      "video_rf_peak": {
+        "bandwidth": 14000000.0,
+        "freq": 5480000.0,
+        "gain": 4.0
+      }
+    }
+  },
+  "SVHS": {
+    "base": "VHS",
+    "decoder_params": {
+      "boost_ramp": {
+        "rf_linear_0": 1.0,
+        "rf_linear_20": 4.0
+      },
+      "nonlinear": {
+        "amp_lpf_freq": 590000.0,
+        "exp_scaling": 0.23,
+        "highpass_freq": 320000.0,
+        "logistic": {
+          "mid": 0.2,
+          "rate": 14.0
+        },
+        "scaling_1": null,
+        "scaling_2": 0.72,
+        "use_sub_deemphasis": true
+      },
+      "video_bpf": null,
+      "video_custom_luma_filters": [
+        {
+          "filename": "svhs-sp-linear-subdeemphasis",
+          "kind": "File"
+        },
+        {
+          "gain": 4.0,
+          "kind": "Shelf",
+          "midfreq": 2000000.0,
+          "q": 0.4967045,
+          "shelf_kind": "High"
+        }
+      ],
+      "video_hpf_extra": 1300000.0,
+      "video_hpf_extra_order": 20,
+      "video_lpf_extra": 9100000.0,
+      "video_lpf_extra_order": 25,
+      "video_lpf_freq": 7500000.0,
+      "video_lpf_order": 6,
+      "video_lpf_supergauss": true,
+      "video_rf_peak": {
+        "bandwidth": 16000000.0,
+        "freq": 6200000.0
+      }
+    }
+  },
+  "SVHS_ET": {
+    "base": "SVHS",
+    "decoder_params": {
+      "video_lpf_extra": 8450000.0
+    }
+  },
+  "TYPEB": {
+    "decoder_params": {
+      "boost_bpf": {
+        "high": 10000000.0,
+        "low": 9500000.0,
+        "mult": 0.0
+      },
+      "boost_ramp": null,
+      "chroma_audio_notch_freq": 0.0,
+      "chroma_bpf_lower": 60000.0,
+      "chroma_bpf_order": 4,
+      "chroma_bpf_upper": 200000.0,
+      "chroma_offset": 5.0,
+      "chroma_rotation": null,
+      "deemph": {
+        "gain": 7.35,
+        "mid": 420000.0,
+        "q": 0.5
+      },
+      "fm_audio_channels": null,
+      "nonlinear": {
+        "amp_lpf_freq": 700000.0,
+        "bandpass_order": 1,
+        "bandpass_upper": null,
+        "exp_scaling": 0.25,
+        "highpass_freq": 1000000.0,
+        "highpass_limit_h": 5000.0,
+        "highpass_limit_l": -20000.0,
+        "logistic": null,
+        "scaling_1": null,
+        "scaling_2": null,
+        "static_factor": null,
+        "use_sub_deemphasis": false
+      },
+      "video_bpf": {
+        "order": 1
+      },
+      "video_custom_luma_filters": null,
+      "video_eq": {
+        "loband": {
+          "corner": 2620000.0,
+          "order_limit": 20,
+          "transition": 500000.0
+        }
+      },
+      "video_hpf_extra_order": 1,
+      "video_lpf_extra": 14000000.0,
+      "video_lpf_extra_order": 3,
+      "video_lpf_order": 6,
+      "video_lpf_supergauss": false,
+      "video_rf_peak": null
+    }
+  },
+  "TYPEC": {
+    "decode_options": {
+      "fallback_vsync": true,
+      "field_order_action": "None"
+    },
+    "decoder_params": {
+      "boost_bpf": {
+        "high": 10000000.0,
+        "low": 9500000.0,
+        "mult": 0.0
+      },
+      "boost_ramp": null,
+      "chroma_audio_notch_freq": 0.0,
+      "chroma_bpf_lower": 60000.0,
+      "chroma_bpf_order": 4,
+      "chroma_offset": 5.0,
+      "chroma_rotation": null,
+      "deemph": {
+        "q": 0.5
+      },
+      "fm_audio_channels": null,
+      "nonlinear": {
+        "amp_lpf_freq": 700000.0,
+        "bandpass_order": 1,
+        "bandpass_upper": null,
+        "exp_scaling": 0.25,
+        "highpass_freq": 1000000.0,
+        "highpass_limit_h": 5000.0,
+        "highpass_limit_l": -20000.0,
+        "logistic": null,
+        "scaling_1": null,
+        "scaling_2": null,
+        "static_factor": null,
+        "use_sub_deemphasis": false
+      },
+      "video_bpf": {
+        "high": 12000000.0,
+        "order": 1
+      },
+      "video_custom_luma_filters": null,
+      "video_eq": {
+        "loband": {
+          "corner": 2620000.0,
+          "order_limit": 20,
+          "transition": 500000.0
+        }
+      },
+      "video_hpf_extra_order": 1,
+      "video_lpf_extra": 14000000.0,
+      "video_lpf_extra_order": 3,
+      "video_lpf_order": 6,
+      "video_lpf_supergauss": false,
+      "video_rf_peak": null
+    }
+  },
+  "UMATIC": {
+    "decode_options": {
+      "chroma_afc_fine_tune_fh_ratio": 1.0
+    },
+    "decoder_params": {
+      "boost_ramp": {
+        "start_freq": 0.0
+      },
+      "chroma_audio_notch_freq": 0.0,
+      "chroma_bpf_lower": 60000.0,
+      "chroma_bpf_order": 4,
+      "chroma_bpf_upper": 1500000.0,
+      "chroma_offset": 5.0,
+      "chroma_rotation": null,
+      "deemph": {
+        "gain": 10.8,
+        "mid": 500000.0,
+        "q": 0.5
+      },
+      "fm_audio_channels": null,
+      "nonlinear": {
+        "amp_lpf_freq": 700000.0,
+        "bandpass_order": 1,
+        "bandpass_upper": null,
+        "exp_scaling": 0.25,
+        "highpass_freq": 1000000.0,
+        "highpass_limit_h": 5000.0,
+        "logistic": null,
+        "scaling_1": null,
+        "scaling_2": null,
+        "static_factor": null,
+        "use_sub_deemphasis": false
+      },
+      "video_bpf": null,
+      "video_custom_luma_filters": null,
+      "video_eq": {
+        "loband": {
+          "corner": 2620000.0,
+          "order_limit": 20,
+          "transition": 500000.0
+        }
+      },
+      "video_hpf_extra": 1400000.0,
+      "video_hpf_extra_order": 14,
+      "video_lpf_order": 6,
+      "video_lpf_supergauss": false
+    }
+  },
+  "UMATIC_HI": {
+    "base": "UMATIC",
+    "decoder_params": {
+      "boost_bpf": {
+        "high": 6800000.0,
+        "low": 6000000.0,
+        "mult": 0.0
+      },
+      "boost_ramp": null,
+      "chroma_bpf_upper": 1300000.0,
+      "color_under_carrier": 923828.0,
+      "nonlinear": {
+        "highpass_limit_l": -20000.0
+      },
+      "video_bpf": {
+        "high": 7000000.0,
+        "order": 1
+      },
+      "video_hpf_extra": 1500000.0,
+      "video_hpf_extra_order": 8,
+      "video_lpf_extra": 7200000.0,
+      "video_lpf_extra_order": 3,
+      "video_lpf_freq": 4200000.0,
+      "video_rf_peak": null
+    }
+  },
+  "VCR": {
+    "decoder_params": {
+      "boost_bpf": {
+        "high": 4500000.0,
+        "low": 4000000.0,
+        "mult": 1.0
+      },
+      "boost_ramp": null,
+      "chroma_audio_notch_freq": 0.0,
+      "chroma_bpf_lower": 60000.0,
+      "chroma_bpf_order": 4,
+      "chroma_bpf_upper": 1200000.0,
+      "chroma_offset": 5.0,
+      "chroma_rotation": null,
+      "color_under_carrier": 562500.0,
+      "deemph": {
+        "gain": 16.0,
+        "mid": 600000.0,
+        "q": 0.5
+      },
+      "fm_audio_channels": null,
+      "nonlinear": {
+        "amp_lpf_freq": 700000.0,
+        "bandpass_order": 1,
+        "bandpass_upper": null,
+        "exp_scaling": 0.25,
+        "highpass_freq": 1000000.0,
+        "highpass_limit_h": 5000.0,
+        "highpass_limit_l": -20000.0,
+        "logistic": null,
+        "scaling_1": null,
+        "scaling_2": null,
+        "static_factor": null,
+        "use_sub_deemphasis": false
+      },
+      "video_bpf": {
+        "high": 5000000.0,
+        "order": 2
+      },
+      "video_custom_luma_filters": null,
+      "video_eq": {
+        "loband": {
+          "corner": 2620000.0,
+          "order_limit": 20,
+          "transition": 500000.0
+        }
+      },
+      "video_hpf_extra": 1200000.0,
+      "video_hpf_extra_order": 2,
+      "video_lpf_extra": 5500000.0,
+      "video_lpf_extra_order": 3,
+      "video_lpf_freq": 3000000.0,
+      "video_lpf_order": 6,
+      "video_lpf_supergauss": false,
+      "video_rf_peak": null
+    }
+  },
+  "VCR_LP": {
+    "base": "VCR",
+    "decoder_params": {
+      "boost_bpf": {
+        "high": 5000000.0,
+        "low": 4400000.0
+      },
+      "deemph": {
+        "gain": 6.8
+      },
+      "video_bpf": {
+        "high": 5500000.0
+      },
+      "video_lpf_extra": 6000000.0,
+      "video_lpf_extra_order": 2
+    }
+  },
+  "VHD": {
+    "decoder_params": {
+      "boost_bpf": null,
+      "boost_ramp": {
+        "rf_linear_0": 1.0,
+        "rf_linear_20": 2.0,
+        "start_freq": 0.0
+      },
+      "chroma_audio_notch_freq": 0.0,
+      "chroma_bpf_lower": 60000.0,
+      "chroma_bpf_order": 4,
+      "chroma_bpf_upper": 200000.0,
+      "chroma_offset": 5.0,
+      "chroma_rotation": null,
+      "color_under_carrier": 3580000.0,
+      "deemph": {
+        "gain": 12.0,
+        "mid": 350000.0,
+        "q": 0.5
+      },
+      "fm_audio_channels": null,
+      "nonlinear": {
+        "amp_lpf_freq": 700000.0,
+        "bandpass_order": 1,
+        "bandpass_upper": null,
+        "exp_scaling": 0.25,
+        "highpass_freq": 0.0,
+        "highpass_limit_h": 0.0,
+        "highpass_limit_l": 0.0,
+        "logistic": null,
+        "scaling_1": null,
+        "scaling_2": null,
+        "static_factor": null,
+        "use_sub_deemphasis": false
+      },
+      "video_bpf": null,
+      "video_custom_luma_filters": null,
+      "video_hpf_extra": 2600000.0,
+      "video_hpf_extra_order": 20,
+      "video_lpf_extra": 10000000.0,
+      "video_lpf_extra_order": 25,
+      "video_lpf_freq": 5500000.0,
+      "video_lpf_order": 6,
+      "video_lpf_supergauss": false,
+      "video_rf_peak": {
+        "bandwidth": 20000000.0,
+        "freq": 7500000.0,
+        "gain": 4.0
+      }
+    }
+  },
+  "VHS": {
+    "decoder_params": {
+      "boost_bpf": null,
+      "boost_ramp": {
+        "rf_linear_0": 0.0,
+        "rf_linear_20": 1.0
+      },
+      "chroma_audio_notch_freq": 0.0,
+      "chroma_bpf_lower": 60000.0,
+      "chroma_bpf_order": 4,
+      "chroma_offset": 5.0,
+      "deemph": {
+        "gain": 13.9794,
+        "mid": 273755.82,
+        "q": 0.462088186
+      },
+      "nonlinear": {
+        "amp_lpf_freq": 700000.0,
+        "bandpass_order": 1,
+        "bandpass_upper": null,
+        "highpass_freq": 820000.0,
+        "highpass_limit_h": 5000.0,
+        "highpass_limit_l": -20000.0,
+        "logistic": null,
+        "scaling_2": null,
+        "static_factor": null
+      },
+      "video_custom_luma_filters": null,
+      "video_eq": {
+        "loband": {
+          "corner": 2620000.0,
+          "order_limit": 20,
+          "transition": 500000.0
+        }
+      },
+      "video_rf_peak": {
+        "bandwidth": 10000000.0,
+        "gain": 4.0
+      }
+    }
+  },
+  "VHSHQ": {
+    "base": "VHS"
+  },
+  "VIDEO2000": {
+    "decoder_params": {
+      "boost_bpf": null,
+      "boost_ramp": {
+        "rf_linear_0": 0.75,
+        "rf_linear_20": 1.0,
+        "start_freq": 0.0
+      },
+      "chroma_audio_notch_freq": 0.0,
+      "chroma_bpf_lower": 220000.0,
+      "chroma_bpf_order": 5,
+      "chroma_bpf_upper": 1100000.0,
+      "chroma_offset": 5.0,
+      "chroma_rotation": [
+        0,
+        -1
+      ],
+      "color_under_carrier": 626953.0,
+      "deemph": {
+        "gain": 12.9794,
+        "mid": 273755.82,
+        "q": 0.462088186
+      },
+      "fm_audio_channels": null,
+      "nonlinear": {
+        "amp_lpf_freq": 700000.0,
+        "bandpass_order": 1,
+        "bandpass_upper": null,
+        "exp_scaling": 0.12,
+        "highpass_freq": 820000.0,
+        "highpass_limit_h": 5000.0,
+        "highpass_limit_l": -20000.0,
+        "logistic": null,
+        "scaling_1": 0.1,
+        "scaling_2": null,
+        "static_factor": null
+      },
+      "video_bpf": null,
+      "video_custom_luma_filters": null,
+      "video_eq": {
+        "loband": {
+          "corner": 2620000.0,
+          "order_limit": 20,
+          "transition": 500000.0
+        }
+      },
+      "video_hpf_extra": 900000.0,
+      "video_hpf_extra_order": 16,
+      "video_lpf_extra": 5910000.0,
+      "video_lpf_extra_order": 20,
+      "video_lpf_freq": 3000000.0,
+      "video_lpf_order": 6,
+      "video_lpf_supergauss": false,
+      "video_rf_peak": null
+    }
+  },
+  "VIDEO8": {
+    "decoder_params": {
+      "boost_bpf": null,
+      "boost_ramp": {
+        "rf_linear_0": 0.25,
+        "rf_linear_20": 1.0,
+        "start_freq": 0.0
+      },
+      "chroma_audio_notch_freq": 1500000.0,
+      "chroma_bpf_lower": 180000.0,
+      "chroma_bpf_order": 10,
+      "chroma_bpf_upper": 1150000.0,
+      "chroma_deemphasis_enabled": true,
+      "chroma_offset": 5.0,
+      "deemph": {
+        "gain": 11.5794,
+        "mid": 273755.82,
+        "q": 0.4613901
+      },
+      "fm_audio_channels": {
+        "channel_0_freq": 1500000.0,
+        "channel_1_freq": 1700000.0
+      },
+      "nonlinear": {
+        "amp_lpf_freq": 700000.0,
+        "bandpass_order": 1,
+        "bandpass_upper": null,
+        "exp_scaling": 0.43,
+        "highpass_freq": 265000.0,
+        "highpass_limit_h": 5000.0,
+        "highpass_limit_l": -20000.0,
+        "logistic": null,
+        "scaling_1": 0.25,
+        "scaling_2": null,
+        "static_factor": null,
+        "use_sub_deemphasis": true
+      },
+      "video_bpf": null,
+      "video_custom_luma_filters": null,
+      "video_eq": {
+        "loband": {
+          "corner": 2620000.0,
+          "order_limit": 20,
+          "transition": 500000.0
+        }
+      },
+      "video_hpf_extra": 1900000.0,
+      "video_hpf_extra_order": 17,
+      "video_lpf_extra": 7150000.0,
+      "video_lpf_extra_order": 17,
+      "video_lpf_freq": 3500000.0,
+      "video_lpf_order": 6,
+      "video_lpf_supergauss": false,
+      "video_rf_peak": {
+        "bandwidth": 12000000.0,
+        "freq": 4.8,
+        "gain": 2.0
+      }
+    }
+  }
+}
