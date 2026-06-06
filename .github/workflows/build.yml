@@ -39,7 +39,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "build failed for $name" }
             New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
             Copy-Item "target-$name/x86_64-pc-windows-msvc/release/tape-decode.exe" "dist/$name/tape-decode.exe"
-            Copy-Item "target-$name/x86_64-pc-windows-msvc/release/tape-decode.pdb" "dist/$name/tape-decode.pdb"
+            Copy-Item "target-$name/x86_64-pc-windows-msvc/release/tape_decode.pdb" "dist/$name/tape_decode.pdb"
           }
 
       - name: Package windows.7z
