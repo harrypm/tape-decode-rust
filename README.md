@@ -12,6 +12,7 @@ Use nightly Rust for best performance builds.
 RUSTFLAGS="-C target-cpu=native" cargo build --release
 ```
 
+
 ### Pre-built binaries
 
 Pre-built binaries for x86-64 and aarch64 Windows and Linux (glibc) are available in Releases. For x86-64, ensure you use the correct one for your [CPU feature level](https://en.wikipedia.org/wiki/X86-64#Microarchitecture_levels).
@@ -34,9 +35,13 @@ The repository includes a Qt6 launcher (`decode.py` + `decode_launcher.py`) mode
 ### Run from source
 
 ```bash
-python3 -m pip install -r requirements-launcher.txt
-python3 decode.py
+python3 -m venv .venv-launcher
+source .venv-launcher/bin/activate
+python -m pip install -r requirements-launcher.txt
+python decode.py
 ```
+
+If your distro uses an externally-managed Python environment (PEP 668), use this venv flow instead of installing launcher dependencies into system Python.
 
 The launcher defaults to guided `tape-decode decode` command creation (profile/output/frequency/threads), and can also run `list-profiles`, `compare`, and `write-profile` in a terminal.
 
@@ -47,6 +52,27 @@ The launcher defaults to guided `tape-decode decode` command creation (profile/o
 ```bash
 python3 decode.py decode --profile PAL_VHS --luma-out out.tbc capture.flac
 ```
+
+### Build/package notes
+
+- Windows EXE launcher bundle: `scripts/ci/build-windows-decode-bin.py`
+- macOS app bundle launcher: `scripts/ci/build-macos-decode-bin.py`
+- Linux launcher binary for AppImage staging: `scripts/ci/build-linux-decode-bin.py`
+
+Linux local packaging sequence (matching CI workflow):
+
+```bash
+cargo build --release --target x86_64-unknown-linux-gnu --bin tape-decode
+source .venv-launcher/bin/activate
+python -m pip install pyinstaller -r requirements-launcher.txt
+TAPE_DECODE_BIN=target/x86_64-unknown-linux-gnu/release/tape-decode \
+  python scripts/ci/build-linux-decode-bin.py
+```
+
+For release artifacts, trigger:
+- `.github/workflows/build_windows_decode.yml`
+- `.github/workflows/build_macos_decode.yml`
+- `.github/workflows/build_linux_decode.yml`
 
 ### Examples
 
