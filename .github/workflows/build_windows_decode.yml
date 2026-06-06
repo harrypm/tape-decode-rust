@@ -1,0 +1,51 @@
+name: "Build Windows decode launcher"
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-decode:
+    name: Build decode-light (x86_64)
+    runs-on: windows-2022
+    env:
+      SETUPTOOLS_RUST_CARGO_PROFILE: release
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build tape-decode binary
+        run: cargo build --release --target x86_64-pc-windows-msvc --bin tape-decode
+
+      - name: Install launcher packaging dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pyinstaller-versionfile -r requirements-launcher.txt
+
+      - name: Build launcher EXE
+        run: python .\scripts\ci\build-windows-decode-bin.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: decode-light_windows_x86_64
+          path: dist/decode-light.exe
+          if-no-files-found: error
+
+      - name: Upload EXE to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/decode-light.exe

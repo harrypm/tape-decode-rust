@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=decode-light
+Exec=decode-light
+Terminal=false
+Icon=decode-light
+Type=Application
+Categories=AudioVideo;Video;
+Comment=decode-light Decode Launcher
