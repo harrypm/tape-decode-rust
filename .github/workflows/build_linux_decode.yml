@@ -8,8 +8,25 @@ on:
 
 jobs:
   build-decode:
-    name: Build decode-light AppImage (x86_64)
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            appimagetool: appimagetool-x86_64.AppImage
+            appimage_arch: x86_64
+            output_name: decode-light-x86_64.AppImage
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            appimagetool: appimagetool-aarch64.AppImage
+            appimage_arch: aarch64
+            output_name: decode-light-aarch64.AppImage
+
+    name: Build decode-light AppImage (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     env:
       SETUPTOOLS_RUST_CARGO_PROFILE: release
     steps:
@@ -23,9 +40,11 @@ jobs:
           python-version: "3.12"
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Build tape-decode binary
-        run: cargo build --release --target x86_64-unknown-linux-gnu --bin tape-decode
+        run: cargo build --release --target "${{ matrix.target }}" --bin tape-decode
 
       - name: Install launcher packaging dependencies
         run: |
@@ -34,7 +53,7 @@ jobs:
 
       - name: Build launcher binary
         env:
-          TAPE_DECODE_BIN: target/x86_64-unknown-linux-gnu/release/tape-decode
+          TAPE_DECODE_BIN: target/${{ matrix.target }}/release/tape-decode
         run: python3 scripts/ci/build-linux-decode-bin.py
 
       - name: Build AppDir and AppImage
@@ -63,22 +82,25 @@ jobs:
           ln -sf usr/share/applications/decode-light.desktop AppDir/decode-light.desktop
           ln -sf usr/share/icons/hicolor/256x256/apps/decode-light.png AppDir/decode-light.png
 
-          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
-          chmod +x appimagetool-x86_64.AppImage
-          ./appimagetool-x86_64.AppImage --appimage-extract
-          env -u SOURCE_DATE_EPOCH ARCH=x86_64 ./squashfs-root/AppRun AppDir decode-light-x86_64.AppImage
-          chmod +x decode-light-x86_64.AppImage
-          mv decode-light-x86_64.AppImage dist/
+          APPIMAGE_TOOL="${{ matrix.appimagetool }}"
+          OUTPUT_NAME="${{ matrix.output_name }}"
+
+          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/${APPIMAGE_TOOL}"
+          chmod +x "${APPIMAGE_TOOL}"
+          "./${APPIMAGE_TOOL}" --appimage-extract
+          env -u SOURCE_DATE_EPOCH ARCH=${{ matrix.appimage_arch }} ./squashfs-root/AppRun AppDir "${OUTPUT_NAME}"
+          chmod +x "${OUTPUT_NAME}"
+          mv "${OUTPUT_NAME}" dist/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: decode-light_linux_x86_64
-          path: dist/decode-light-x86_64.AppImage
+          name: decode-light_linux_${{ matrix.arch }}
+          path: dist/${{ matrix.output_name }}
           if-no-files-found: error
 
       - name: Upload AppImage to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/decode-light-x86_64.AppImage
+          files: dist/${{ matrix.output_name }}
