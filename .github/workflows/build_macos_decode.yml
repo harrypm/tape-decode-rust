@@ -1,0 +1,79 @@
+name: "Build macOS decode launcher"
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-decode:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            arch: x86_64
+            target: x86_64-apple-darwin
+
+    name: Build decode-light (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    env:
+      SETUPTOOLS_RUST_CARGO_PROFILE: release
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build tape-decode binary
+        run: cargo build --release --target "${{ matrix.target }}" --bin tape-decode
+
+      - name: Install launcher packaging dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install pyinstaller -r requirements-launcher.txt
+
+      - name: Build app bundle
+        env:
+          TAPE_DECODE_BIN: target/${{ matrix.target }}/release/tape-decode
+        run: python3 scripts/ci/build-macos-decode-bin.py
+
+      - name: Ad-hoc sign app bundle
+        run: codesign -s - --deep --force dist/decode-light.app
+
+      - name: Build DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG_NAME="decode-light-${{ matrix.arch }}.dmg"
+          rm -rf build/dmg
+          mkdir -p build/dmg
+          cp -R dist/decode-light.app build/dmg/
+          ln -s /Applications build/dmg/Applications
+          hdiutil create -volname "decode-light" -srcfolder build/dmg -ov -format UDZO "$DMG_NAME"
+          mv "$DMG_NAME" dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: decode-light_macos_${{ matrix.arch }}
+          path: dist/decode-light-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+
+      - name: Upload DMG to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/decode-light-${{ matrix.arch }}.dmg

@@ -14,10 +14,36 @@ RUSTFLAGS="-C target-cpu=native" cargo build --release
 
 Pre-built binaries for x64 Windows and Linux (glibc) are available in Releases. Ensure you use the correct one for your CPU feature level. On aarch64 it is recommended that you always build from source for the native architecture, as extension support is more varied.
 
+Cross-platform GUI package workflows are also available for:
+- Windows launcher EXE (`.github/workflows/build_windows_decode.yml`)
+- macOS app bundle + DMG (`.github/workflows/build_macos_decode.yml`)
+- Linux AppImage (`.github/workflows/build_linux_decode.yml`)
+
 ## Usage
 
 ```bash
 tape-decode --help
+```
+
+## Decode Launcher GUI (Qt6)
+
+The repository includes a Qt6 launcher (`decode.py` + `decode_launcher.py`) modeled after the vhs-decode Decode Launcher and wired to `tape-decode`.
+
+### Run from source
+
+```bash
+python3 -m pip install -r requirements-launcher.txt
+python3 decode.py
+```
+
+The launcher defaults to guided `tape-decode decode` command creation (profile/output/frequency/threads), and can also run `list-profiles`, `compare`, and `write-profile` in a terminal.
+
+### CLI passthrough via dispatcher
+
+`decode.py` also forwards normal CLI args directly to `tape-decode`:
+
+```bash
+python3 decode.py decode --profile PAL_VHS --luma-out out.tbc capture.flac
 ```
 
 ### Examples

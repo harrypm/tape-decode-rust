@@ -1,0 +1,84 @@
+name: "Build Linux decode launcher"
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-decode:
+    name: Build decode-light AppImage (x86_64)
+    runs-on: ubuntu-latest
+    env:
+      SETUPTOOLS_RUST_CARGO_PROFILE: release
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build tape-decode binary
+        run: cargo build --release --target x86_64-unknown-linux-gnu --bin tape-decode
+
+      - name: Install launcher packaging dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install pyinstaller -r requirements-launcher.txt
+
+      - name: Build launcher binary
+        env:
+          TAPE_DECODE_BIN: target/x86_64-unknown-linux-gnu/release/tape-decode
+        run: python3 scripts/ci/build-linux-decode-bin.py
+
+      - name: Build AppDir and AppImage
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp dist/decode-light AppDir/usr/bin/decode-light
+          chmod +x AppDir/usr/bin/decode-light
+
+          cp resources/appimage/decode-light.desktop AppDir/usr/share/applications/decode-light.desktop
+          cp resources/appimage/AppRun AppDir/AppRun
+          chmod +x AppDir/AppRun
+
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          icon = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO0N6xQAAAAASUVORK5CYII=")
+          Path("AppDir/usr/share/icons/hicolor/256x256/apps/decode-light.png").write_bytes(icon)
+          PY
+
+          ln -sf usr/share/applications/decode-light.desktop AppDir/decode-light.desktop
+          ln -sf usr/share/icons/hicolor/256x256/apps/decode-light.png AppDir/decode-light.png
+
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          ./appimagetool-x86_64.AppImage --appimage-extract
+          env -u SOURCE_DATE_EPOCH ARCH=x86_64 ./squashfs-root/AppRun AppDir decode-light-x86_64.AppImage
+          chmod +x decode-light-x86_64.AppImage
+          mv decode-light-x86_64.AppImage dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: decode-light_linux_x86_64
+          path: dist/decode-light-x86_64.AppImage
+          if-no-files-found: error
+
+      - name: Upload AppImage to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/decode-light-x86_64.AppImage
