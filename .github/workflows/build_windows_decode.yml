@@ -8,8 +8,21 @@ on:
 
 jobs:
   build-decode:
-    name: Build decode-light (x86_64)
-    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            python_arch: x64
+          - arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            python_arch: arm64
+
+    name: Build decode-light (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     env:
       SETUPTOOLS_RUST_CARGO_PROFILE: release
     steps:
@@ -21,13 +34,14 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          architecture: ${{ matrix.python_arch }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ matrix.target }}
 
       - name: Build tape-decode binary
-        run: cargo build --release --target x86_64-pc-windows-msvc --bin tape-decode
+        run: cargo build --release --target "${{ matrix.target }}" --bin tape-decode
 
       - name: Install launcher packaging dependencies
         run: |
@@ -35,17 +49,21 @@ jobs:
           pip install pyinstaller pyinstaller-versionfile -r requirements-launcher.txt
 
       - name: Build launcher EXE
+        env:
+          TAPE_DECODE_BIN: target\${{ matrix.target }}\release\tape-decode.exe
         run: python .\scripts\ci\build-windows-decode-bin.py
+      - name: Rename EXE by architecture
+        run: Move-Item -Path dist\decode-light.exe -Destination dist\decode-light-${{ matrix.arch }}.exe -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: decode-light_windows_x86_64
-          path: dist/decode-light.exe
+          name: decode-light_windows_${{ matrix.arch }}
+          path: dist/decode-light-${{ matrix.arch }}.exe
           if-no-files-found: error
 
       - name: Upload EXE to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/decode-light.exe
+          files: dist/decode-light-${{ matrix.arch }}.exe

@@ -16,9 +16,9 @@ RUSTFLAGS="-C target-cpu=native" cargo build --release
 Pre-built binaries for x64 Windows and Linux (glibc) are available in Releases. Ensure you use the correct one for your CPU feature level. On aarch64 it is recommended that you always build from source for the native architecture, as extension support is more varied.
 
 Cross-platform GUI package workflows are also available for:
-- Windows launcher EXE (`.github/workflows/build_windows_decode.yml`)
-- macOS app bundle + DMG (`.github/workflows/build_macos_decode.yml`)
-- Linux AppImage (`.github/workflows/build_linux_decode.yml`)
+- Windows launcher EXE (x86_64 + arm64): `.github/workflows/build_windows_decode.yml`
+- macOS app bundle + DMG (x86_64 + arm64): `.github/workflows/build_macos_decode.yml`
+- Linux AppImage (x86_64 + aarch64): `.github/workflows/build_linux_decode.yml`
 
 ## Usage
 
@@ -66,6 +66,8 @@ python -m pip install pyinstaller -r requirements-launcher.txt
 TAPE_DECODE_BIN=target/x86_64-unknown-linux-gnu/release/tape-decode \
   python scripts/ci/build-linux-decode-bin.py
 ```
+
+For Linux arm64 local builds, replace `x86_64-unknown-linux-gnu` with `aarch64-unknown-linux-gnu` in both commands.
 
 For release artifacts, trigger:
 - `.github/workflows/build_windows_decode.yml`
