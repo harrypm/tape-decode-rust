@@ -1,18 +1,51 @@
-name: Build
+name: Build and release binary
 
 on:
-  push:
-    branches: ["**"]
-  pull_request:
   workflow_dispatch:
+    inputs:
+      create_release:
+        description: "Create a GitHub release and upload built assets"
+        required: false
+        type: boolean
+        default: false
+      release_tag:
+        description: "Tag to release when manually dispatched (example: v0.6.0)"
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  windows:
-    name: Windows (x86-64 v1-v4)
+  windows-cli:
+    name: Windows CLI build (x86-64 v1-v4)
     runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve build version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.release_tag }}" ]]; then
+            VERSION="${{ github.event.inputs.release_tag }}"
+          else
+            VERSION="$(bash scripts/ci/git-version.sh)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
         run: |
@@ -42,32 +75,53 @@ jobs:
             Copy-Item "target-$name/x86_64-pc-windows-msvc/release/tape_decode.pdb" "dist/$name/tape_decode.pdb"
           }
 
-      - name: Package windows.7z
+      - name: Package versioned Windows archive
         shell: pwsh
         run: |
-          & 7z a -t7z windows.7z .\dist\*
+          $Version = '${{ steps.version.outputs.version }}'
+          $ArchiveName = "windows_decode-light-cli_${Version}_x86_64-v1-v4.7z"
+          & 7z a -t7z $ArchiveName .\dist\*
           if ($LASTEXITCODE -ne 0) { throw "7z packaging failed" }
+          if (-not (Test-Path $ArchiveName)) { throw "Expected archive not found: $ArchiveName" }
 
-      - name: Upload windows.7z
+      - name: Upload Windows archive
         uses: actions/upload-artifact@v7
         with:
-          name: windows
-          path: windows.7z
+          name: windows-cli
+          path: windows_decode-light-cli_*_x86_64-v1-v4.7z
+          if-no-files-found: error
 
-  linux:
-    name: Oracle Linux 8 (x86-64 v1-v4)
+  linux-cli:
+    name: Linux CLI build (x86-64 v1-v4)
     runs-on: ubuntu-latest
     container:
       image: oraclelinux:8
     steps:
       - name: Install build dependencies
         run: |
-          dnf -y install gcc make tar xz findutils which
+          dnf -y install gcc make tar xz findutils which git
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve build version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.release_tag }}" ]]; then
+            VERSION="${{ github.event.inputs.release_tag }}"
+          else
+            VERSION="$(bash scripts/ci/git-version.sh)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build all microarchitecture levels
         run: |
@@ -92,13 +146,69 @@ jobs:
             objcopy "--add-gnu-debuglink=dist/$name/tape-decode.debug" "dist/$name/tape-decode"
           done
 
-      - name: Package linux.tar.xz
+      - name: Package versioned Linux archive
+        shell: bash
         run: |
           set -euo pipefail
-          tar -cJf linux.tar.xz -C dist .
+          ARCHIVE_NAME="linux_decode-light-cli_${{ steps.version.outputs.version }}_x86_64-v1-v4.tar.xz"
+          tar -cJf "${ARCHIVE_NAME}" -C dist .
+          test -f "${ARCHIVE_NAME}"
 
-      - name: Upload linux.tar.xz
+      - name: Upload Linux archive
         uses: actions/upload-artifact@v7
         with:
-          name: linux
-          path: linux.tar.xz
+          name: linux-cli
+          path: linux_decode-light-cli_*_x86_64-v1-v4.tar.xz
+          if-no-files-found: error
+
+  release:
+    name: Publish CLI release assets
+    runs-on: ubuntu-24.04
+    needs:
+      - windows-cli
+      - linux-cli
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="${{ github.event.inputs.release_tag }}"
+            if [[ -z "$TAG" ]]; then
+              echo "release_tag is required when create_release=true" >&2
+              exit 1
+            fi
+            if ! git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git tag "$TAG" "$GITHUB_SHA"
+              git push origin "$TAG"
+            fi
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            release-assets/**/windows_decode-light-cli_*_x86_64-v1-v4.7z
+            release-assets/**/linux_decode-light-cli_*_x86_64-v1-v4.tar.xz
