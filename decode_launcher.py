@@ -175,9 +175,11 @@ def _open_terminal(command_parts: list[str], working_directory: Path) -> None:
     command = _shell_join(command_parts)
     shell = os.environ.get("SHELL", "/bin/bash")
     shell_command = (
+        f'echo "[decode-launcher] starting command..."; '
         f"cd {shlex.quote(str(working_directory))} && {command}; "
+        "status=$?; "
         "echo; "
-        'echo "[decode-launcher] process finished with exit code $?"; '
+        'echo "[decode-launcher] process finished with exit code $status"; '
         f"exec {shlex.quote(shell)} -l"
     )
 
