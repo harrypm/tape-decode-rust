@@ -289,6 +289,7 @@ class DecodeLauncherWindow(QWidget):
         self.command_preview.setReadOnly(True)
 
         self.launch_button = QPushButton("Launch selected tool")
+        self.launch_tbc_tools_button = QPushButton("Launch tbc-tools / ld-analyse")
         self.close_button = QPushButton("Close")
 
         self._output_manually_set = False
@@ -352,6 +353,7 @@ class DecodeLauncherWindow(QWidget):
 
         action_row = QHBoxLayout()
         action_row.addWidget(self.launch_button)
+        action_row.addWidget(self.launch_tbc_tools_button)
         action_row.addWidget(self.close_button)
 
         root.addWidget(launch_group)
@@ -380,6 +382,7 @@ class DecodeLauncherWindow(QWidget):
         self.output_browse_button.clicked.connect(self._browse_output_path)
         self.profile_file_browse_button.clicked.connect(self._browse_profile_file)
         self.launch_button.clicked.connect(self._launch_selected_tool)
+        self.launch_tbc_tools_button.clicked.connect(self._launch_tbc_tools)
         self.close_button.clicked.connect(self.close)
 
     def _selected_tool(self) -> ToolSpec:
@@ -580,6 +583,167 @@ class DecodeLauncherWindow(QWidget):
         )
         if selected:
             self.profile_file_edit.setText(selected)
+
+    def _output_to_tbc_candidate(self, output_value: str) -> Optional[Path]:
+        if not output_value.strip():
+            return None
+
+        output_path = Path(output_value.strip()).expanduser()
+        if not output_path.is_absolute():
+            output_path = self._effective_working_directory() / output_path
+        output_path = output_path.resolve(strict=False)
+
+        if output_path.suffix.lower() == ".tbc":
+            return output_path
+        return Path(str(output_path) + ".tbc")
+
+    def _candidate_tbc_path(self) -> Optional[Path]:
+        tbc_path = self._output_to_tbc_candidate(self.output_edit.text())
+        if tbc_path is None:
+            return None
+        if tbc_path.exists():
+            return tbc_path
+        if self._is_decode_tool():
+            return tbc_path
+        return None
+
+    def _candidate_tbc_tool_names(self) -> list[str]:
+        if os.name == "nt":
+            return ["ld-analyse.exe", "tbc-analyse.exe", "tbc-tools.exe"]
+        if sys.platform == "darwin":
+            return ["ld-analyse", "tbc-analyse", "tbc-tools"]
+        return [
+            "ld-analyse",
+            "tbc-analyse",
+            "tbc-tools",
+            "tbc-tools.AppImage",
+            "tbc-tools.appimage",
+            "tbc-tools-x86_64.AppImage",
+            "tbc-tools-x86_64.appimage",
+            "tbc-tools-aarch64.AppImage",
+            "tbc-tools-aarch64.appimage",
+        ]
+
+    def _existing_parent_dir(self, raw_path: str) -> Optional[Path]:
+        if not raw_path.strip():
+            return None
+        candidate = Path(raw_path.strip()).expanduser()
+        parent = candidate.parent
+        if parent.is_dir():
+            return parent.resolve()
+        return None
+
+    def _candidate_tbc_search_roots(self) -> list[Path]:
+        roots: list[Path] = [self._effective_working_directory()]
+        input_parent = self._existing_parent_dir(self.input_edit.text())
+        output_parent = self._existing_parent_dir(self.output_edit.text())
+        if input_parent is not None:
+            roots.append(input_parent)
+        if output_parent is not None:
+            roots.append(output_parent)
+
+        if os.name == "nt":
+            roots.extend(
+                [
+                    Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
+                    Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")),
+                    Path.home() / "AppData" / "Local" / "Programs",
+                ]
+            )
+        elif sys.platform == "darwin":
+            roots.extend(
+                [
+                    Path("/Applications"),
+                    Path.home() / "Applications",
+                    Path("/opt/homebrew/bin"),
+                    Path("/usr/local/bin"),
+                    Path("/usr/bin"),
+                ]
+            )
+        else:
+            roots.extend(
+                [
+                    Path("/usr/local/bin"),
+                    Path("/usr/bin"),
+                    Path("/opt"),
+                    Path.home() / "Applications",
+                    Path.home() / "bin",
+                ]
+            )
+
+        deduped: list[Path] = []
+        seen: set[str] = set()
+        for root in roots:
+            key = str(root.resolve(strict=False))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(root)
+        return deduped
+
+    def _find_tbc_tools_executable(self) -> Optional[Path]:
+        names = self._candidate_tbc_tool_names()
+
+        for name in names:
+            on_path = shutil.which(name)
+            if on_path:
+                return Path(on_path)
+
+        for root in self._candidate_tbc_search_roots():
+            for name in names:
+                direct = root / name
+                if direct.is_file():
+                    return direct
+
+                in_tbc_tools_dir = root / "tbc-tools" / name
+                if in_tbc_tools_dir.is_file():
+                    return in_tbc_tools_dir
+
+            if sys.platform == "darwin":
+                mac_candidates = [
+                    root / "tbc-tools.app" / "Contents" / "MacOS" / "ld-analyse",
+                    root / "tbc-tools.app" / "Contents" / "MacOS" / "tbc-tools",
+                    root / "ld-analyse.app" / "Contents" / "MacOS" / "ld-analyse",
+                ]
+                for candidate in mac_candidates:
+                    if candidate.is_file():
+                        return candidate
+
+        return None
+
+    def _macos_app_bundle_for_binary(self, executable: Path) -> Optional[Path]:
+        if sys.platform != "darwin":
+            return None
+        for parent in executable.resolve(strict=False).parents:
+            if parent.suffix.lower() == ".app":
+                return parent
+        return None
+
+    def _launch_tbc_tools(self) -> None:
+        executable = self._find_tbc_tools_executable()
+        if executable is None:
+            QMessageBox.critical(
+                self,
+                "tbc-tools not found",
+                "Could not find tbc-tools / ld-analyse in PATH or standard install locations.",
+            )
+            return
+
+        tbc_candidate = self._candidate_tbc_path()
+        app_bundle = self._macos_app_bundle_for_binary(executable)
+        if app_bundle is not None:
+            command = ["open", "-a", str(app_bundle)]
+            if tbc_candidate is not None:
+                command += ["--args", str(tbc_candidate)]
+        else:
+            command = [str(executable)]
+            if tbc_candidate is not None:
+                command.append(str(tbc_candidate))
+
+        try:
+            subprocess.Popen(command, cwd=str(self._effective_working_directory()))
+        except Exception as exc:
+            QMessageBox.critical(self, "Launch failed", str(exc))
 
     def _launch_selected_tool(self) -> None:
         tool = self._selected_tool()
