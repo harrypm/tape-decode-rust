@@ -2,9 +2,25 @@ name: "Build Windows decode launcher"
 
 on:
   workflow_dispatch:
+    inputs:
+      create_release:
+        description: "Create a GitHub release and upload built assets"
+        required: false
+        type: boolean
+        default: false
+      release_tag:
+        description: "Tag to release when manually dispatched (example: v0.6.0)"
+        required: false
+        type: string
   push:
     tags:
       - "v*"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-decode:
@@ -16,29 +32,48 @@ jobs:
             runner: windows-2022
             target: x86_64-pc-windows-msvc
             python_arch: x64
+            artifact_suffix: x86_64
           - arch: arm64
             runner: windows-11-arm
             target: aarch64-pc-windows-msvc
             python_arch: arm64
+            artifact_suffix: arm64
 
-    name: Build decode-light (${{ matrix.arch }})
+    name: Build decode-light EXE (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     env:
       SETUPTOOLS_RUST_CARGO_PROFILE: release
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           fetch-tags: true
 
-      - uses: actions/setup-python@v6
+      - name: Setup Python
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           architecture: ${{ matrix.python_arch }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Resolve build version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.release_tag }}" ]]; then
+            VERSION="${{ github.event.inputs.release_tag }}"
+          else
+            VERSION="$(bash scripts/ci/git-version.sh)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build tape-decode binary
         run: cargo build --release --target "${{ matrix.target }}" --bin tape-decode
@@ -50,20 +85,86 @@ jobs:
 
       - name: Build launcher EXE
         env:
-          TAPE_DECODE_BIN: target\${{ matrix.target }}\release\tape-decode.exe
+          TAPE_DECODE_BIN: target/${{ matrix.target }}/release/tape-decode.exe
         run: python .\scripts\ci\build-windows-decode-bin.py
-      - name: Rename EXE by architecture
-        run: Move-Item -Path dist\decode-light.exe -Destination dist\decode-light-${{ matrix.arch }}.exe -Force
 
-      - name: Upload artifact
+      - name: Package versioned EXE ZIP
+        shell: pwsh
+        run: |
+          $Version = '${{ steps.version.outputs.version }}'
+          $ExeName = "windows_decode-light_${Version}_${{ matrix.artifact_suffix }}.exe"
+          Move-Item -Path dist\decode-light.exe -Destination "dist\$ExeName" -Force
+          $ZipName = "windows_decode-light_${Version}_${{ matrix.artifact_suffix }}.zip"
+          Compress-Archive -Path @("dist\$ExeName") -DestinationPath $ZipName -Force
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $ZipName))
+          try {
+            if ($zip.Entries.Count -ne 1) {
+              throw "Expected 1 entry in $ZipName, found $($zip.Entries.Count)"
+            }
+            foreach ($entry in $zip.Entries) {
+              if ($entry.FullName.Contains('/') -or $entry.FullName.Contains('\')) {
+                throw "ZIP entry is nested; expected flat layout: $($entry.FullName)"
+              }
+            }
+          } finally {
+            $zip.Dispose()
+          }
+
+      - name: Upload Windows ZIP
         uses: actions/upload-artifact@v7
         with:
-          name: decode-light_windows_${{ matrix.arch }}
-          path: dist/decode-light-${{ matrix.arch }}.exe
+          name: windows-zip-${{ matrix.arch }}
+          path: windows_decode-light_*_${{ matrix.artifact_suffix }}.zip
           if-no-files-found: error
 
-      - name: Upload EXE to release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+  release:
+    name: Publish Windows release assets
+    runs-on: ubuntu-24.04
+    needs:
+      - build-decode
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
         with:
-          files: dist/decode-light-${{ matrix.arch }}.exe
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="${{ github.event.inputs.release_tag }}"
+            if [[ -z "$TAG" ]]; then
+              echo "release_tag is required when create_release=true" >&2
+              exit 1
+            fi
+            if ! git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git tag "$TAG" "$GITHUB_SHA"
+              git push origin "$TAG"
+            fi
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            release-assets/**/windows_decode-light_*_x86_64.zip
+            release-assets/**/windows_decode-light_*_arm64.zip

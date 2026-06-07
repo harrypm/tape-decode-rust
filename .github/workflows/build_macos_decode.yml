@@ -2,9 +2,25 @@ name: "Build macOS decode launcher"
 
 on:
   workflow_dispatch:
+    inputs:
+      create_release:
+        description: "Create a GitHub release and upload built assets"
+        required: false
+        type: boolean
+        default: false
+      release_tag:
+        description: "Tag to release when manually dispatched (example: v0.6.0)"
+        required: false
+        type: string
   push:
     tags:
       - "v*"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-decode:
@@ -15,27 +31,46 @@ jobs:
           - os: macos-latest
             arch: arm64
             target: aarch64-apple-darwin
+            artifact_suffix: arm64
           - os: macos-15-intel
             arch: x86_64
             target: x86_64-apple-darwin
+            artifact_suffix: x86_64
 
-    name: Build decode-light (${{ matrix.arch }})
+    name: Build decode-light DMG (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     env:
       SETUPTOOLS_RUST_CARGO_PROFILE: release
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           fetch-tags: true
 
-      - uses: actions/setup-python@v6
+      - name: Setup Python
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Resolve build version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.release_tag }}" ]]; then
+            VERSION="${{ github.event.inputs.release_tag }}"
+          else
+            VERSION="$(bash scripts/ci/git-version.sh)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build tape-decode binary
         run: cargo build --release --target "${{ matrix.target }}" --bin tape-decode
@@ -53,27 +88,76 @@ jobs:
       - name: Ad-hoc sign app bundle
         run: codesign -s - --deep --force dist/decode-light.app
 
-      - name: Build DMG
+      - name: Build and verify DMG
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          DMG_NAME="decode-light-${{ matrix.arch }}.dmg"
+          DMG_NAME="macos_decode-light_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.dmg"
           rm -rf build/dmg
           mkdir -p build/dmg
           cp -R dist/decode-light.app build/dmg/
           ln -s /Applications build/dmg/Applications
           hdiutil create -volname "decode-light" -srcfolder build/dmg -ov -format UDZO "$DMG_NAME"
-          mv "$DMG_NAME" dist/
+          test -f "$DMG_NAME"
+          dist/decode-light.app/Contents/MacOS/decode-light list-profiles > /tmp/decode-light_profiles.txt
+          grep -q "PAL_VHS" /tmp/decode-light_profiles.txt
 
-      - name: Upload artifact
+      - name: Upload macOS DMG
         uses: actions/upload-artifact@v7
         with:
-          name: decode-light_macos_${{ matrix.arch }}
-          path: dist/decode-light-${{ matrix.arch }}.dmg
+          name: macos-dmg-${{ matrix.arch }}
+          path: macos_decode-light_*_${{ matrix.artifact_suffix }}.dmg
           if-no-files-found: error
 
-      - name: Upload DMG to release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+  release:
+    name: Publish macOS release assets
+    runs-on: ubuntu-24.04
+    needs:
+      - build-decode
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
         with:
-          files: dist/decode-light-${{ matrix.arch }}.dmg
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="${{ github.event.inputs.release_tag }}"
+            if [[ -z "$TAG" ]]; then
+              echo "release_tag is required when create_release=true" >&2
+              exit 1
+            fi
+            if ! git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git tag "$TAG" "$GITHUB_SHA"
+              git push origin "$TAG"
+            fi
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            release-assets/**/macos_decode-light_*_x86_64.dmg
+            release-assets/**/macos_decode-light_*_arm64.dmg

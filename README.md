@@ -58,6 +58,7 @@ python3 decode.py decode --profile PAL_VHS --luma-out out.tbc capture.flac
 - Windows EXE launcher bundle: `scripts/ci/build-windows-decode-bin.py`
 - macOS app bundle launcher: `scripts/ci/build-macos-decode-bin.py`
 - Linux launcher binary for AppImage staging: `scripts/ci/build-linux-decode-bin.py`
+- Shared Git version resolver (MISRC-style): `scripts/ci/git-version.sh`
 
 Linux local packaging sequence (matching CI workflow):
 
@@ -70,6 +71,14 @@ TAPE_DECODE_BIN=target/x86_64-unknown-linux-gnu/release/tape-decode \
 ```
 
 For Linux arm64 local builds, replace `x86_64-unknown-linux-gnu` with `aarch64-unknown-linux-gnu` in both commands.
+
+GitHub Actions release formatting now mirrors MISRC:
+- `workflow_dispatch` supports `create_release` and `release_tag` inputs.
+- Artifact names are versioned and architecture-scoped:
+  - `linux_decode-light_<version>_<arch>.zip`
+  - `windows_decode-light_<version>_<arch>.zip`
+  - `macos_decode-light_<version>_<arch>.dmg`
+- Version is resolved from tags (`v*`) or `scripts/ci/git-version.sh` fallback (`dev-<sha>` style).
 
 For release artifacts, trigger:
 - `.github/workflows/build_windows_decode.yml`
