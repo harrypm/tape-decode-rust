@@ -23,15 +23,44 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  windows-cli:
-    name: Windows CLI build (x86-64 v1-v4)
-    runs-on: windows-latest
+  build-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            appimagetool: appimagetool-x86_64.AppImage
+            appimage_arch: x86_64
+            artifact_suffix: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            appimagetool: appimagetool-aarch64.AppImage
+            appimage_arch: aarch64
+            artifact_suffix: arm64
+
+    name: Build decode-light AppImage (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    env:
+      SETUPTOOLS_RUST_CARGO_PROFILE: release
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
           fetch-tags: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Resolve build version
         id: version
@@ -47,67 +76,200 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Install Rust
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup target add x86_64-pc-windows-msvc
-          rustup default stable
+      - name: Build tape-decode binary
+        run: cargo build --release --target "${{ matrix.target }}" --bin tape-decode
 
-      - name: Build all microarchitecture levels
-        shell: pwsh
+      - name: Install launcher packaging dependencies
         run: |
-          $levels = @{
-            "x86-64-v1" = "x86-64"
-            "x86-64-v2" = "x86-64-v2"
-            "x86-64-v3" = "x86-64-v3"
-            "x86-64-v4" = "x86-64-v4"
-          }
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          foreach ($name in $levels.Keys) {
-            $cpu = $levels[$name]
-            Write-Host "Building $name (target-cpu=$cpu)"
-            $env:RUSTFLAGS = "-C target-cpu=$cpu"
-            $env:CARGO_TARGET_DIR = "target-$name"
-            cargo build --release --target x86_64-pc-windows-msvc --bin tape-decode
-            if ($LASTEXITCODE -ne 0) { throw "build failed for $name" }
-            New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
-            Copy-Item "target-$name/x86_64-pc-windows-msvc/release/tape-decode.exe" "dist/$name/tape-decode.exe"
-            Copy-Item "target-$name/x86_64-pc-windows-msvc/release/tape_decode.pdb" "dist/$name/tape_decode.pdb"
-          }
+          python3 -m pip install --upgrade pip
+          pip install pyinstaller -r requirements-launcher.txt
 
-      - name: Package versioned Windows archive
+      - name: Build launcher binary
+        env:
+          TAPE_DECODE_BIN: target/${{ matrix.target }}/release/tape-decode
+        run: python3 scripts/ci/build-linux-decode-bin.py
+
+      - name: Build AppDir and AppImage
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp dist/decode-light AppDir/usr/bin/decode-light
+          chmod +x AppDir/usr/bin/decode-light
+
+          cp resources/appimage/decode-light.desktop AppDir/usr/share/applications/decode-light.desktop
+          cp resources/appimage/AppRun AppDir/AppRun
+          chmod +x AppDir/AppRun
+
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          icon = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO0N6xQAAAAASUVORK5CYII=")
+          Path("AppDir/usr/share/icons/hicolor/256x256/apps/decode-light.png").write_bytes(icon)
+          PY
+
+          ln -sf usr/share/applications/decode-light.desktop AppDir/decode-light.desktop
+          ln -sf usr/share/icons/hicolor/256x256/apps/decode-light.png AppDir/decode-light.png
+
+          APPIMAGE_TOOL="${{ matrix.appimagetool }}"
+          APPIMAGE_NAME="linux_decode-light_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.AppImage"
+
+          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/${APPIMAGE_TOOL}"
+          chmod +x "${APPIMAGE_TOOL}"
+          "./${APPIMAGE_TOOL}" --appimage-extract
+          env -u SOURCE_DATE_EPOCH ARCH=${{ matrix.appimage_arch }} ./squashfs-root/AppRun AppDir "${APPIMAGE_NAME}"
+          chmod +x "${APPIMAGE_NAME}"
+
+          APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-light_profiles.txt
+          grep -q "PAL_VHS" /tmp/decode-light_profiles.txt
+
+          ZIP_NAME="linux_decode-light_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.zip"
+          zip -j "${ZIP_NAME}" "${APPIMAGE_NAME}"
+          test -f "${ZIP_NAME}"
+          test "$(unzip -Z1 "${ZIP_NAME}" | wc -l)" -eq 1
+
+      - name: Upload Linux ZIP
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-zip-${{ matrix.arch }}
+          path: linux_decode-light_*_${{ matrix.artifact_suffix }}.zip
+          if-no-files-found: error
+
+  build-windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            python_arch: x64
+            artifact_suffix: x86_64
+          - arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            python_arch: arm64
+            artifact_suffix: arm64
+
+    name: Build decode-light EXE (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    env:
+      SETUPTOOLS_RUST_CARGO_PROFILE: release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          architecture: ${{ matrix.python_arch }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Resolve build version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.release_tag }}" ]]; then
+            VERSION="${{ github.event.inputs.release_tag }}"
+          else
+            VERSION="$(bash scripts/ci/git-version.sh)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build tape-decode binary
+        run: cargo build --release --target "${{ matrix.target }}" --bin tape-decode
+
+      - name: Install launcher packaging dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pyinstaller-versionfile -r requirements-launcher.txt
+
+      - name: Build launcher EXE
+        env:
+          TAPE_DECODE_BIN: target/${{ matrix.target }}/release/tape-decode.exe
+        run: python .\scripts\ci\build-windows-decode-bin.py
+
+      - name: Package versioned EXE ZIP
         shell: pwsh
         run: |
           $Version = '${{ steps.version.outputs.version }}'
-          $ArchiveName = "windows_decode-light-cli_${Version}_x86_64-v1-v4.7z"
-          & 7z a -t7z $ArchiveName .\dist\*
-          if ($LASTEXITCODE -ne 0) { throw "7z packaging failed" }
-          if (-not (Test-Path $ArchiveName)) { throw "Expected archive not found: $ArchiveName" }
+          $ExeName = "windows_decode-light_${Version}_${{ matrix.artifact_suffix }}.exe"
+          Move-Item -Path dist\decode-light.exe -Destination "dist\$ExeName" -Force
+          $ZipName = "windows_decode-light_${Version}_${{ matrix.artifact_suffix }}.zip"
+          Compress-Archive -Path @("dist\$ExeName") -DestinationPath $ZipName -Force
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $ZipName))
+          try {
+            if ($zip.Entries.Count -ne 1) {
+              throw "Expected 1 entry in $ZipName, found $($zip.Entries.Count)"
+            }
+            foreach ($entry in $zip.Entries) {
+              if ($entry.FullName.Contains('/') -or $entry.FullName.Contains('\')) {
+                throw "ZIP entry is nested; expected flat layout: $($entry.FullName)"
+              }
+            }
+          } finally {
+            $zip.Dispose()
+          }
 
-      - name: Upload Windows archive
+      - name: Upload Windows ZIP
         uses: actions/upload-artifact@v7
         with:
-          name: windows-cli
-          path: windows_decode-light-cli_*_x86_64-v1-v4.7z
+          name: windows-zip-${{ matrix.arch }}
+          path: windows_decode-light_*_${{ matrix.artifact_suffix }}.zip
           if-no-files-found: error
 
-  linux-cli:
-    name: Linux CLI build (x86-64 v1-v4)
-    runs-on: ubuntu-latest
-    container:
-      image: oraclelinux:8
-    steps:
-      - name: Install build dependencies
-        run: |
-          dnf -y install gcc make tar xz findutils which git
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+            target: aarch64-apple-darwin
+            artifact_suffix: arm64
+          - os: macos-15-intel
+            arch: x86_64
+            target: x86_64-apple-darwin
+            artifact_suffix: x86_64
 
+    name: Build decode-light DMG (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    env:
+      SETUPTOOLS_RUST_CARGO_PROFILE: release
+    steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
           fetch-tags: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Resolve build version
         id: version
@@ -123,50 +285,52 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Build all microarchitecture levels
-        run: |
-          set -euo pipefail
-          export PATH="$HOME/.cargo/bin:$PATH"
-          declare -A levels=(
-            ["x86-64-v1"]="x86-64"
-            ["x86-64-v2"]="x86-64-v2"
-            ["x86-64-v3"]="x86-64-v3"
-            ["x86-64-v4"]="x86-64-v4"
-          )
-          mkdir -p dist
-          for name in "${!levels[@]}"; do
-            cpu="${levels[$name]}"
-            echo "Building $name (target-cpu=$cpu)"
-            RUSTFLAGS="-C target-cpu=$cpu" CARGO_TARGET_DIR="target-$name" \
-              cargo build --release --target x86_64-unknown-linux-gnu --bin tape-decode
-            mkdir -p "dist/$name"
-            cp "target-$name/x86_64-unknown-linux-gnu/release/tape-decode" "dist/$name/tape-decode"
-            objcopy --only-keep-debug "dist/$name/tape-decode" "dist/$name/tape-decode.debug"
-            strip --strip-debug --strip-unneeded "dist/$name/tape-decode"
-            objcopy "--add-gnu-debuglink=dist/$name/tape-decode.debug" "dist/$name/tape-decode"
-          done
+      - name: Build tape-decode binary
+        run: cargo build --release --target "${{ matrix.target }}" --bin tape-decode
 
-      - name: Package versioned Linux archive
+      - name: Install launcher packaging dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install pyinstaller -r requirements-launcher.txt
+
+      - name: Build app bundle
+        env:
+          TAPE_DECODE_BIN: target/${{ matrix.target }}/release/tape-decode
+        run: python3 scripts/ci/build-macos-decode-bin.py
+
+      - name: Ad-hoc sign app bundle
+        run: codesign -s - --deep --force dist/decode-light.app
+
+      - name: Build and verify DMG
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          ARCHIVE_NAME="linux_decode-light-cli_${{ steps.version.outputs.version }}_x86_64-v1-v4.tar.xz"
-          tar -cJf "${ARCHIVE_NAME}" -C dist .
-          test -f "${ARCHIVE_NAME}"
+          DMG_NAME="macos_decode-light_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.dmg"
+          rm -rf build/dmg
+          mkdir -p build/dmg
+          cp -R dist/decode-light.app build/dmg/
+          ln -s /Applications build/dmg/Applications
+          hdiutil create -volname "decode-light" -srcfolder build/dmg -ov -format UDZO "${DMG_NAME}"
+          test -f "${DMG_NAME}"
+          dist/decode-light.app/Contents/MacOS/decode-light list-profiles > /tmp/decode-light_profiles.txt
+          grep -q "PAL_VHS" /tmp/decode-light_profiles.txt
 
-      - name: Upload Linux archive
+      - name: Upload macOS DMG
         uses: actions/upload-artifact@v7
         with:
-          name: linux-cli
-          path: linux_decode-light-cli_*_x86_64-v1-v4.tar.xz
+          name: macos-dmg-${{ matrix.arch }}
+          path: macos_decode-light_*_${{ matrix.artifact_suffix }}.dmg
           if-no-files-found: error
 
   release:
-    name: Publish CLI release assets
+    name: Publish decode-light release assets
     runs-on: ubuntu-24.04
     needs:
-      - windows-cli
-      - linux-cli
+      - build-linux
+      - build-windows
+      - build-macos
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
     permissions:
       contents: write
@@ -210,5 +374,9 @@ jobs:
           name: ${{ steps.tag.outputs.tag }}
           generate_release_notes: true
           files: |
-            release-assets/**/windows_decode-light-cli_*_x86_64-v1-v4.7z
-            release-assets/**/linux_decode-light-cli_*_x86_64-v1-v4.tar.xz
+            release-assets/**/linux_decode-light_*_x86_64.zip
+            release-assets/**/linux_decode-light_*_arm64.zip
+            release-assets/**/windows_decode-light_*_x86_64.zip
+            release-assets/**/windows_decode-light_*_arm64.zip
+            release-assets/**/macos_decode-light_*_x86_64.dmg
+            release-assets/**/macos_decode-light_*_arm64.dmg
