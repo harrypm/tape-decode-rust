@@ -1,177 +1,285 @@
-name: Build
+name: Build and release binary
 
 on:
-  push:
-    branches: ["**"]
-  pull_request:
   workflow_dispatch:
+    inputs:
+      create_release:
+        description: "Create a GitHub release and upload built assets"
+        required: false
+        type: boolean
+        default: false
+      release_tag:
+        description: "Tag to release when manually dispatched (example: v0.6.0)"
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  windows:
-    name: Windows x86-64
+  windows-cli:
+    name: Windows CLI build (x86-64 v1-v4)
     runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Install Rust
-        run: |
-          rustup toolchain install nightly --profile minimal
-          rustup default nightly
-          rustup target add x86_64-pc-windows-msvc
-
-      - name: Build all microarchitecture levels
-        shell: pwsh
-        run: |
-          $levels = @{
-            "x86-64-v1" = "x86-64"
-            "x86-64-v2" = "x86-64-v2"
-            "x86-64-v3" = "x86-64-v3"
-            "x86-64-v4" = "x86-64-v4"
-            "alderlake" = "alderlake"
-          }
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          foreach ($name in $levels.Keys) {
-            $cpu = $levels[$name]
-            Write-Host "Building $name (target-cpu=$cpu)"
-            $env:RUSTFLAGS = "-C target-cpu=$cpu"
-            $env:CARGO_TARGET_DIR = "target-$name"
-            cargo build --release --target x86_64-pc-windows-msvc --bin tape-decode
-            if ($LASTEXITCODE -ne 0) { throw "build failed for $name" }
-            New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
-            Copy-Item "target-$name/x86_64-pc-windows-msvc/release/tape-decode.exe" "dist/$name/tape-decode.exe"
-            Copy-Item "target-$name/x86_64-pc-windows-msvc/release/tape_decode.pdb" "dist/$name/tape_decode.pdb"
-          }
-
-      - name: Package windows.7z
-        shell: pwsh
-        run: |
-          & 7z a -t7z windows.7z .\dist\*
-          if ($LASTEXITCODE -ne 0) { throw "7z packaging failed" }
-
-      - name: Upload windows.7z
-        uses: actions/upload-artifact@v7
         with:
-          name: windows
-          path: windows.7z
+          fetch-depth: 0
+          fetch-tags: true
 
-  windows-aarch64:
-    name: Windows aarch64
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install Rust
-        run: |
-          rustup toolchain install nightly --profile minimal
-          rustup default nightly
-          rustup target add aarch64-pc-windows-msvc
-
-      - name: Build
-        shell: pwsh
-        run: |
-          cargo build --release --target aarch64-pc-windows-msvc --bin tape-decode
-          if ($LASTEXITCODE -ne 0) { throw "build failed" }
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "target/aarch64-pc-windows-msvc/release/tape-decode.exe" "dist/tape-decode.exe"
-          Copy-Item "target/aarch64-pc-windows-msvc/release/tape_decode.pdb" "dist/tape_decode.pdb"
-
-      - name: Package windows-aarch64.7z
-        shell: pwsh
-        run: |
-          & 7z a -t7z windows-aarch64.7z .\dist\*
-          if ($LASTEXITCODE -ne 0) { throw "7z packaging failed" }
-
-      - name: Upload windows-aarch64.7z
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-aarch64
-          path: windows-aarch64.7z
-
-  linux:
-    name: Oracle Linux 8 x86-64
-    runs-on: ubuntu-latest
-    container:
-      image: oraclelinux:8
-    steps:
-      - name: Install build dependencies
-        run: |
-          dnf -y install gcc make tar xz findutils which
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain nightly
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Build all microarchitecture levels
+      - name: Resolve build version
+        id: version
+        shell: bash
         run: |
           set -euo pipefail
-          export PATH="$HOME/.cargo/bin:$PATH"
-          declare -A levels=(
-            ["x86-64-v1"]="x86-64"
-            ["x86-64-v2"]="x86-64-v2"
-            ["x86-64-v3"]="x86-64-v3"
-            ["x86-64-v4"]="x86-64-v4"
-            ["alderlake"]="alderlake"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.release_tag }}" ]]; then
+            VERSION="${{ github.event.inputs.release_tag }}"
+          else
+            VERSION="$(git describe --tags --always --dirty)"
+          fi
+          VERSION="${VERSION#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build tape-decode CLI (Windows x86-64 v1-v4)
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A TARGET_MAP=(
+            [v1]=x86_64-pc-windows-msvc
+            [v2]=x86_64-pc-windows-msvc
+            [v3]=x86_64-pc-windows-msvc
+            [v4]=x86_64-pc-windows-msvc
           )
-          mkdir -p dist
-          for name in "${!levels[@]}"; do
-            cpu="${levels[$name]}"
-            echo "Building $name (target-cpu=$cpu)"
-            RUSTFLAGS="-C target-cpu=$cpu" CARGO_TARGET_DIR="target-$name" \
-              cargo build --release --target x86_64-unknown-linux-gnu --bin tape-decode
-            mkdir -p "dist/$name"
-            cp "target-$name/x86_64-unknown-linux-gnu/release/tape-decode" "dist/$name/tape-decode"
-            objcopy --only-keep-debug "dist/$name/tape-decode" "dist/$name/tape-decode.debug"
-            strip --strip-debug --strip-unneeded "dist/$name/tape-decode"
-            objcopy "--add-gnu-debuglink=dist/$name/tape-decode.debug" "dist/$name/tape-decode"
+          declare -A RUSTFLAGS_MAP=(
+            [v1]="-C target-feature=+sse2"
+            [v2]="-C target-feature=+sse3,+ssse3,+sse4.1,+sse4.2"
+            [v3]="-C target-feature=+avx,+avx2"
+            [v4]="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl"
+          )
+          for LEVEL in v1 v2 v3 v4; do
+            echo "::group::Build Windows ${LEVEL}"
+            cargo build --release --target "${TARGET_MAP[$LEVEL]}" --bin tape-decode
+            echo "::endgroup::"
+          done
+        env:
+          RUSTFLAGS: "${{ matrix.rustflags }}"
+
+      - name: List built Windows binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -la target/x86_64-pc-windows-msvc/release/tape-decode.exe
+
+      - name: Package Windows binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p "release/windows-x86_64"
+          for LEVEL in v1 v2 v3 v4; do
+            mkdir -p "release/windows-x86_64/tape-decode-${LEVEL}"
+            cp "target/x86_64-pc-windows-msvc/release/tape-decode.exe" \
+               "release/windows-x86_64/tape-decode-${LEVEL}/tape-decode.exe"
+          done
+          7z a "release/tape-decode-windows-x86_64-v${VERSION}.zip" "release/windows-x86_64"
+          echo "WINDOWS_RELEASE_ASSET=release/tape-decode-windows-x86_64-v${VERSION}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Windows build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tape-decode-windows-x86_64
+          path: |
+            release/windows-x86_64/tape-decode-*/tape-decode.exe
+            release/tape-decode-windows-x86_64-*.zip
+          if-no-files-found: error
+
+  linux-cli:
+    name: Linux CLI build (x86-64 v1-v4 + aarch64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve build version
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.release_tag }}" ]]; then
+            VERSION="${{ github.event.inputs.release_tag }}"
+          else
+            VERSION="$(git describe --tags --always --dirty)"
+          fi
+          VERSION="${VERSION#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build tape-decode CLI (Linux x86-64 v1-v4 + aarch64)
+        run: |
+          set -euo pipefail
+          declare -A TARGET_MAP=(
+            [v1]=x86_64-unknown-linux-gnu
+            [v2]=x86_64-unknown-linux-gnu
+            [v3]=x86_64-unknown-linux-gnu
+            [v4]=x86_64-unknown-linux-gnu
+            [aarch64]=aarch64-unknown-linux-gnu
+          )
+          declare -A RUSTFLAGS_MAP=(
+            [v1]="-C target-feature=+sse2"
+            [v2]="-C target-feature=+sse3,+ssse3,+sse4.1,+sse4.2"
+            [v3]="-C target-feature=+avx,+avx2"
+            [v4]="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl"
+            [aarch64]=""
+          )
+          for KEY in v1 v2 v3 v4 aarch64; do
+            echo "::group::Build ${KEY}"
+            RUSTFLAGS="${RUSTFLAGS_MAP[$KEY]}" \
+              cargo build --release --target "${TARGET_MAP[$KEY]}" --bin tape-decode
+            echo "::endgroup::"
           done
 
-      - name: Package linux.tar.xz
+      - name: Package Linux binaries
         run: |
           set -euo pipefail
-          tar -cJf linux.tar.xz -C dist .
+          VERSION="${{ steps.version.outputs.version }}"
+          for LEVEL in v1 v2 v3 v4; do
+            mkdir -p "release/linux-x86_64/tape-decode-${LEVEL}"
+            cp "target/x86_64-unknown-linux-gnu/release/tape-decode" \
+               "release/linux-x86_64/tape-decode-${LEVEL}/tape-decode"
+          done
+          mkdir -p "release/linux-aarch64"
+          cp "target/aarch64-unknown-linux-gnu/release/tape-decode" \
+             "release/linux-aarch64/tape-decode"
+          tar -C release -czf "release/tape-decode-linux-x86_64-v${VERSION}.tar.gz" "linux-x86_64"
+          tar -C release -czf "release/tape-decode-linux-aarch64-v${VERSION}.tar.gz" "linux-aarch64"
+          echo "LINUX_X86_64_ASSET=release/tape-decode-linux-x86_64-v${VERSION}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "LINUX_AARCH64_ASSET=release/tape-decode-linux-aarch64-v${VERSION}.tar.gz" >> "$GITHUB_OUTPUT"
 
-      - name: Upload linux.tar.xz
-        uses: actions/upload-artifact@v7
+      - name: Upload Linux build artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: linux
-          path: linux.tar.xz
+          name: tape-decode-linux
+          path: |
+            release/linux-x86_64/tape-decode-*/tape-decode
+            release/linux-aarch64/tape-decode
+            release/tape-decode-linux-*-v*.tar.gz
+          if-no-files-found: error
 
-  linux-aarch64:
-    name: Oracle Linux 8 aarch64
-    runs-on: ubuntu-24.04-arm
-    container:
-      image: oraclelinux:8
+  macos-cli:
+    name: macOS CLI build (x86-64 v1-v4 + aarch64)
+    runs-on: macos-latest
     steps:
-      - name: Install build dependencies
-        run: |
-          dnf -y install gcc make tar xz findutils which
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain nightly
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Build
-        run: |
-          set -euo pipefail
-          export PATH="$HOME/.cargo/bin:$PATH"
-          cargo build --release --target aarch64-unknown-linux-gnu --bin tape-decode
-          mkdir -p dist
-          cp target/aarch64-unknown-linux-gnu/release/tape-decode dist/tape-decode
-          objcopy --only-keep-debug dist/tape-decode dist/tape-decode.debug
-          strip --strip-debug --strip-unneeded dist/tape-decode
-          objcopy --add-gnu-debuglink=dist/tape-decode.debug dist/tape-decode
-
-      - name: Package linux-aarch64.tar.xz
-        run: |
-          set -euo pipefail
-          tar -cJf linux-aarch64.tar.xz -C dist .
-
-      - name: Upload linux-aarch64.tar.xz
-        uses: actions/upload-artifact@v7
         with:
-          name: linux-aarch64
-          path: linux-aarch64.tar.xz
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve build version
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.release_tag }}" ]]; then
+            VERSION="${{ github.event.inputs.release_tag }}"
+          else
+            VERSION="$(git describe --tags --always --dirty)"
+          fi
+          VERSION="${VERSION#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build tape-decode CLI (macOS x86-64 v1-v4 + aarch64)
+        run: |
+          set -euo pipefail
+          declare -A TARGET_MAP=(
+            [v1]=x86_64-apple-darwin
+            [v2]=x86_64-apple-darwin
+            [v3]=x86_64-apple-darwin
+            [v4]=x86_64-apple-darwin
+            [aarch64]=aarch64-apple-darwin
+          )
+          declare -A RUSTFLAGS_MAP=(
+            [v1]="-C target-feature=+sse2"
+            [v2]="-C target-feature=+sse3,+ssse3,+sse4.1,+sse4.2"
+            [v3]="-C target-feature=+avx,+avx2"
+            [v4]="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl"
+            [aarch64]=""
+          )
+          for KEY in v1 v2 v3 v4 aarch64; do
+            echo "::group::Build ${KEY}"
+            RUSTFLAGS="${RUSTFLAGS_MAP[$KEY]}" \
+              cargo build --release --target "${TARGET_MAP[$KEY]}" --bin tape-decode
+            echo "::endgroup::"
+          done
+
+      - name: Package macOS binaries
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          for LEVEL in v1 v2 v3 v4; do
+            mkdir -p "release/macos-x86_64/tape-decode-${LEVEL}"
+            cp "target/x86_64-apple-darwin/release/tape-decode" \
+               "release/macos-x86_64/tape-decode-${LEVEL}/tape-decode"
+          done
+          mkdir -p "release/macos-aarch64"
+          cp "target/aarch64-apple-darwin/release/tape-decode" \
+             "release/macos-aarch64/tape-decode"
+          tar -C release -czf "release/tape-decode-macos-x86_64-v${VERSION}.tar.gz" "macos-x86_64"
+          tar -C release -czf "release/tape-decode-macos-aarch64-v${VERSION}.tar.gz" "macos-aarch64"
+          echo "MACOS_X86_64_ASSET=release/tape-decode-macos-x86_64-v${VERSION}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "MACOS_AARCH64_ASSET=release/tape-decode-macos-aarch64-v${VERSION}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Upload macOS build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tape-decode-macos
+          path: |
+            release/macos-x86_64/tape-decode-*/tape-decode
+            release/macos-aarch64/tape-decode
+            release/tape-decode-macos-*-v*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub release
+    needs: [windows-cli, linux-cli, macos-cli]
+    if: github.event_name == 'workflow_dispatch' && inputs.create_release == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: "tape-decode v${{ steps.version.outputs.version }}"
+          generate_release_notes: true
+          files: |
+            artifacts/tape-decode-windows-x86_64/*.zip
+            artifacts/tape-decode-linux/tape-decode-linux-*.tar.gz
+            artifacts/tape-decode-macos/tape-decode-macos-*.tar.gz
