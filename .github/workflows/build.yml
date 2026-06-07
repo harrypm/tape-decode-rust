@@ -69,11 +69,10 @@ jobs:
           )
           for LEVEL in v1 v2 v3 v4; do
             echo "::group::Build Windows ${LEVEL}"
-            cargo build --release --target "${TARGET_MAP[$LEVEL]}" --bin tape-decode
+            RUSTFLAGS="${RUSTFLAGS_MAP[$LEVEL]}" \
+              cargo build --release --target "${TARGET_MAP[$LEVEL]}" --bin tape-decode
             echo "::endgroup::"
           done
-        env:
-          RUSTFLAGS: "${{ matrix.rustflags }}"
 
       - name: List built Windows binaries
         shell: bash
@@ -130,6 +129,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Windows GNU target
+        run: rustup target add x86_64-pc-windows-gnu || true
 
       - name: Build tape-decode CLI (Linux x86-64 v1-v4 + aarch64)
         run: |
