@@ -37,25 +37,34 @@ fn atan2_fast(y: f32, x: f32) -> f32 {
 }
 
 #[inline(always)]
-fn unwrap_two(a: Complex32, b: Complex32, freq: f32) -> f32 {
+fn unwrap_two(a: Complex32, b: Complex32, freq: f32, offset: f32) -> f32 {
     use std::f32::consts::TAU;
 
     let a = atan2_fast(a.im, a.re);
     let b = atan2_fast(b.im, b.re);
     let diff = b - a;
     let diff = diff - (diff / TAU).floor() * TAU;
-    diff * freq / TAU
+    // `offset` recenters the instantaneous-frequency output (e.g. by the
+    // carrier's 0-IRE frequency) so the demod sits near zero instead of on a
+    // multi-MHz DC pedestal; it folds into the existing per-sample math with no
+    // extra pass.
+    (diff * freq / TAU) - offset
 }
 
 #[inline(always)]
-fn unwrap_more(a: &[Complex32; 8], b: &[Complex32; 8], out: &mut [f32; 8], freq: f32) {
+fn unwrap_more(a: &[Complex32; 8], b: &[Complex32; 8], out: &mut [f32; 8], freq: f32, offset: f32) {
     for i in 0..8 {
-        out[i] = unwrap_two(a[i], b[i], freq);
+        out[i] = unwrap_two(a[i], b[i], freq, offset);
     }
 }
 
 #[inline(never)]
-pub(crate) fn unwrap_angles(input_slice: &[Complex32], output_slice: &mut [f32], freq: f32) {
+pub(crate) fn unwrap_angles(
+    input_slice: &[Complex32],
+    output_slice: &mut [f32],
+    freq: f32,
+    offset: f32,
+) {
     let len = input_slice.len();
     assert_ne!(len, 0);
 
@@ -67,9 +76,9 @@ pub(crate) fn unwrap_angles(input_slice: &[Complex32], output_slice: &mut [f32],
         let prevs = <&[Complex32; 8]>::try_from(prevs_slice).unwrap();
         let currs = <&[Complex32; 8]>::try_from(currs_slice).unwrap();
         let outs = <&mut [f32; 8]>::try_from(outs_slice).unwrap();
-        unwrap_more(prevs, currs, outs, freq);
+        unwrap_more(prevs, currs, outs, freq, offset);
     }
     for i in big_chunks * 8..len - 1 {
-        output_slice[i + 1] = unwrap_two(input_slice[i], input_slice[i + 1], freq);
+        output_slice[i + 1] = unwrap_two(input_slice[i], input_slice[i + 1], freq, offset);
     }
 }

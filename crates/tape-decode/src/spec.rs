@@ -161,7 +161,11 @@ impl DecoderSpec {
         let freq_half = rf_freq / 2.0;
         let freq_hz = rf_freq * 1_000_000.0;
         let freq_hz_half = freq_hz / 2.0;
-        let rf_color_system = sys_params.color_system;
+        let rf_color_system = if decoder_params.is_composite_color {
+            ColorSystem::Monochrome
+        } else {
+            sys_params.color_system
+        };
         let do_cafc = request.cafc;
         // Validated and clamped once here; ResyncCore only reads the result.
         let level_detect_divisor = {
@@ -1007,12 +1011,7 @@ fn biquad_transform(b: &[f64], a: &[f64], wn: f64) -> Result<(Vec<f64>, Vec<f64>
 }
 
 /// Design a digital biquad peaking filter with variable Q (BA output).
-fn peaking(
-    wn: f64,
-    db_gain: f64,
-    q: Option<f64>,
-    bw: Option<f64>
-) -> Result<(Vec<f64>, Vec<f64>)> {
+fn peaking(wn: f64, db_gain: f64, q: Option<f64>, bw: Option<f64>) -> Result<(Vec<f64>, Vec<f64>)> {
     let bw = if q.is_none() && bw.is_none() {
         Some(1.0) // octave
     } else {
@@ -1369,7 +1368,7 @@ fn abs_complex_owned(values: Vec<Complex64>) -> Vec<f64> {
 
 fn multiply<A, B, O>(a: &[A], b: &[B]) -> Vec<O>
 where
-    A: Copy + std::ops::Mul<B, Output=O>,
+    A: Copy + std::ops::Mul<B, Output = O>,
     B: Copy,
 {
     assert_eq!(b.len(), a.len(), "multiply length mismatch");
@@ -1451,7 +1450,11 @@ fn gen_custom_video_filters(
         match filter {
             VideoLumaFilter::File { filename } => {
                 if let Some(values) = embedded_filter_file(filename, freq_hz as i64) {
-                    assert_eq!(values.len(), ret.len(), "custom file filter length mismatch");
+                    assert_eq!(
+                        values.len(),
+                        ret.len(),
+                        "custom file filter length mismatch"
+                    );
                     for (dst, src) in ret.iter_mut().zip(values) {
                         *dst *= src;
                     }

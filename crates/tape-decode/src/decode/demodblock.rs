@@ -1,12 +1,18 @@
 use super::*;
 
-fn unwrap_hilbert(input: &[Complex32], freq: f64) -> Vec<f32> {
+fn unwrap_hilbert(input: &[Complex32], freq: f64, offset: f32) -> Vec<f32> {
     // `unwrap_angles` computes each phase derivative in f32, so the result is an
     // f32-precision signal; store it as f32 instead of widening to f64. The
     // downstream `rfft_f32` narrows to f32 regardless, so this is exact while
     // halving the block-sized demod buffer's write and read traffic.
-    let mut output = vec![0.0f32; input.len()];
-    unwrap_angles(input, &mut output, freq as f32);
+    //
+    // `offset` recenters the demod (the 0-IRE carrier frequency `sys_ire0`) so
+    // the signal sits near zero rather than on a multi-MHz pedestal. The first
+    // sample is the only slot `unwrap_angles` leaves untouched, so seed it with
+    // the same `-offset` the rest receive (its baseline value was 0) to keep the
+    // whole buffer consistently centered.
+    let mut output = vec![-offset; input.len()];
+    unwrap_angles(input, &mut output, freq as f32, offset);
     output
 }
 
@@ -245,10 +251,7 @@ where
     }
 }
 
-fn spectrum_times_filter<T>(
-    spectrum: &[Complex32],
-    filter: &[T],
-) -> Vec<Complex32>
+fn spectrum_times_filter<T>(spectrum: &[Complex32], filter: &[T]) -> Vec<Complex32>
 where
     T: SpectrumFilterSample,
 {
@@ -316,8 +319,7 @@ pub(crate) fn decode_video_block(
     multiply_spectrum_real(&mut indata_fft, &spec.video_rf_filter);
 
     // Analytic signal (the hilbert filter zeroes the negative frequencies).
-    let hilbert_spectrum =
-        spectrum_times_filter(&indata_fft, &spec.video_hilbert_filter);
+    let hilbert_spectrum = spectrum_times_filter(&indata_fft, &spec.video_hilbert_filter);
     let mut hilbert = ifft_complex_owned_f32(hilbert_spectrum, spec.fft_block_inverse_f32.as_ref());
 
     // The rectified envelope is |Re(analytic signal)|; derive it from `hilbert`
@@ -363,7 +365,11 @@ pub(crate) fn decode_video_block(
                 *sample *= (gain * high_boost_value) as f32;
             }
             let high_part_fft = fft_real_f32(&high_part, spec.fft_block_forward_f32.as_ref());
-            assert_eq!(high_part_fft.len(), indata_fft.len(), "high_part_fft length mismatch");
+            assert_eq!(
+                high_part_fft.len(),
+                indata_fft.len(),
+                "high_part_fft length mismatch"
+            );
             for (sample, boost) in indata_fft.iter_mut().zip(high_part_fft) {
                 *sample = Complex32::new(
                     (f64::from(sample.re) + f64::from(boost.re)) as f32,
@@ -371,21 +377,27 @@ pub(crate) fn decode_video_block(
                 );
             }
             // The high boost rewrote indata_fft; recompute the analytic signal.
-            let hilbert_spectrum =
-                spectrum_times_filter(&indata_fft, &spec.video_hilbert_filter);
+            let hilbert_spectrum = spectrum_times_filter(&indata_fft, &spec.video_hilbert_filter);
             hilbert = ifft_complex_owned_f32(hilbert_spectrum, spec.fft_block_inverse_f32.as_ref());
         }
     } else {
         tracing::warn!("RF signal is weak. Is your deck tracking properly?");
     }
 
-    let mut demod = unwrap_hilbert(&hilbert, spec.freq_hz());
+    // The demod is recentered by `sys_ire0` (the 0-IRE carrier frequency) so the
+    // whole block-level luma chain runs near zero instead of on a ~4 MHz DC
+    // pedestal; the offset is added back to the stored luma channels at the end.
+    // This keeps the IIR/FFT filtering well-conditioned (the pedestal would
+    // otherwise dominate the small high-frequency detail the filters extract).
+    let ire0 = f64::from(spec.sys_ire0);
+    let mut demod = unwrap_hilbert(&hilbert, spec.freq_hz(), spec.sys_ire0);
 
-    let diff_demod_check_value =
-        iretohz(f64::from(spec.sys_ire0), f64::from(spec.sys_hz_ire), 100.0) * 2.0;
+    // The diff-demod spike check compares against an absolute-Hz threshold;
+    // shift it into the recentered domain by the same `ire0`.
+    let diff_demod_check_value = iretohz(ire0, f64::from(spec.sys_hz_ire), 100.0) * 2.0 - ire0;
     if !spec.video_disable_diff_demod && max_excluding_edges(&demod, 20) > diff_demod_check_value {
         let hilbert_diffed = ediff1d_complex_to_begin_zero(&hilbert);
-        let demod_b = unwrap_hilbert(&hilbert_diffed, spec.freq_hz());
+        let demod_b = unwrap_hilbert(&hilbert_diffed, spec.freq_hz(), spec.sys_ire0);
         replace_spikes(&mut demod, &demod_b, diff_demod_check_value, 8, 30);
     }
 
@@ -479,13 +491,18 @@ pub(crate) fn decode_video_block(
     let demod_slice = slice_vec(&output_video, BLOCKCUT, BLOCKCUT_END, "demod");
     let demod_05_slice = slice_vec(&out_video05, BLOCKCUT, BLOCKCUT_END, "demod_05");
     let envelope_slice = slice_vec(&env, BLOCKCUT, BLOCKCUT_END, "envelope");
+    // The luma channels carry the recentered demod; restore the absolute-Hz
+    // pedestal here, as they leave the block, so the rest of the pipeline
+    // (levels, scaling, output) is unchanged. The envelope is amplitude data and
+    // was never recentered.
+    let ire0_f32 = spec.sys_ire0;
     for ((&v, &v05), &env_sample) in demod_slice
         .iter()
         .zip(demod_05_slice.iter())
         .zip(envelope_slice.iter())
     {
-        out.demod.push(v);
-        out.demod_05.push(v05);
+        out.demod.push(v + ire0_f32);
+        out.demod_05.push(v05 + ire0_f32);
         out.envelope.push(env_sample);
     }
 

@@ -51,7 +51,7 @@ pub fn wrapped_u16_msre(reference: &[u16], candidate: &[u16], trim_fraction: f64
             wrapped * wrapped
         })
         .collect();
-    trimmed_mean_of_squares_u32(squared, trim_fraction)
+    trimmed_mean_of_squares_u32(squared, trim_fraction).sqrt()
 }
 
 /// Per-field trimmed MSRE over raw luma, compared at the f32 precision the raw
@@ -65,5 +65,5 @@ pub fn f32_msre(reference: &[f32], candidate: &[f32], trim_fraction: f64) -> f64
             diff * diff
         })
         .collect();
-    trimmed_mean_of_squares(squared, trim_fraction)
+    trimmed_mean_of_squares(squared, trim_fraction).sqrt()
 }

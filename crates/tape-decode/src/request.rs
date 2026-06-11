@@ -42,7 +42,7 @@ impl Default for DecodeOptions {
 }
 
 /// Interpolation used by the wow level adjustment, mapped to a spline degree.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize)]
 pub enum WowInterpolation {
     Linear,
     Quadratic,
@@ -156,6 +156,9 @@ pub struct DecoderParams {
     pub video_custom_luma_filters: Option<Vec<VideoLumaFilter>>,
     pub video_rf_peak: Option<RfPeaking>,
     pub video_eq: Option<VideoEqParams>,
+    /// Force color system to [`ColorSystem::Monochrome`] to prevent processing.
+    #[serde(default)]
+    pub is_composite_color: bool,
     pub color_under_carrier: f64,
     /// When set, the color-under chroma is run through the deemphasis filter
     /// during upconversion. Has no effect on monochrome profiles.
@@ -257,7 +260,7 @@ pub enum VideoLumaFilter {
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct DecodeRequest {
     pub inputfreq: f64,
 

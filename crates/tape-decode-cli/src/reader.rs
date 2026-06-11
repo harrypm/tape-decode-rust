@@ -28,46 +28,52 @@ trait SampleEncoding: Send {
     fn widen(bytes: &[u8], out: &mut [f32]);
 }
 
-/// One unsigned byte per sample, widened straight to `f32`.
+/// One unsigned byte per sample, centered and normalized to ~[-1, 1].
 struct U8Sample;
 impl SampleEncoding for U8Sample {
     const BYTES: usize = 1;
     fn widen(bytes: &[u8], out: &mut [f32]) {
+        const MID: f32 = 127.5;
+        const INV: f32 = 1.0 / 127.5;
         for (dst, &byte) in out.iter_mut().zip(bytes) {
-            *dst = f32::from(byte);
+            *dst = (f32::from(byte) - MID) * INV;
         }
     }
 }
 
-/// One signed byte per sample, widened straight to `f32`.
+/// One signed byte per sample, normalized to ~[-1, 1].
 struct S8Sample;
 impl SampleEncoding for S8Sample {
     const BYTES: usize = 1;
     fn widen(bytes: &[u8], out: &mut [f32]) {
+        const INV: f32 = 1.0 / 128.0;
         for (dst, &byte) in out.iter_mut().zip(bytes) {
-            *dst = f32::from(byte as i8);
+            *dst = f32::from(byte as i8) * INV;
         }
     }
 }
 
-/// One little-endian `i16` per sample, widened to `f32`.
+/// One little-endian `i16` per sample, normalized to ~[-1, 1].
 struct S16Sample;
 impl SampleEncoding for S16Sample {
     const BYTES: usize = 2;
     fn widen(bytes: &[u8], out: &mut [f32]) {
+        const INV: f32 = 1.0 / 32768.0;
         for (dst, word) in out.iter_mut().zip(bytes.chunks_exact(2)) {
-            *dst = f32::from(i16::from_le_bytes([word[0], word[1]]));
+            *dst = f32::from(i16::from_le_bytes([word[0], word[1]])) * INV;
         }
     }
 }
 
-/// One little-endian `u16` per sample, widened to `f32`.
+/// One little-endian `u16` per sample, centered and normalized to ~[-1, 1].
 struct U16Sample;
 impl SampleEncoding for U16Sample {
     const BYTES: usize = 2;
     fn widen(bytes: &[u8], out: &mut [f32]) {
+        const MID: f32 = 32767.5;
+        const INV: f32 = 1.0 / 32767.5;
         for (dst, word) in out.iter_mut().zip(bytes.chunks_exact(2)) {
-            *dst = f32::from(u16::from_le_bytes([word[0], word[1]]));
+            *dst = (f32::from(u16::from_le_bytes([word[0], word[1]])) - MID) * INV;
         }
     }
 }
