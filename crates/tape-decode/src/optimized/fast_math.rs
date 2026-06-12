@@ -15,12 +15,24 @@ pub(crate) fn fadd_algebraic(a: f32, b: f32) -> f32 {
 }
 
 /// Sum with reassociation allowed, so the reduction vectorizes instead of
-/// running as one serial carried add.
+/// running as one serial carried add. The lane accumulators make the data
+/// parallelism explicit; a plain `fold` over `fadd_algebraic` still compiled
+/// to one serial carried add.
 #[inline]
 pub(crate) fn sum_algebraic(values: &[f32]) -> f32 {
-    values
+    const LANES: usize = 16;
+    let mut acc = [0.0f32; LANES];
+    let mut chunks = values.chunks_exact(LANES);
+    for chunk in &mut chunks {
+        for (lane, &value) in acc.iter_mut().zip(chunk) {
+            *lane = fadd_algebraic(*lane, value);
+        }
+    }
+    let tail = chunks
+        .remainder()
         .iter()
-        .fold(0.0, |acc, &value| fadd_algebraic(acc, value))
+        .fold(0.0, |sum, &value| fadd_algebraic(sum, value));
+    acc.iter().fold(tail, |sum, &lane| fadd_algebraic(sum, lane))
 }
 
 /// exp2(y) for `y` within the normal-exponent range: split into an integer

@@ -190,13 +190,20 @@ fn sub_deemphasis(
 
     // Scale the band-pass filtered signal by one minus the resulting referenc
     // e.g this means it get scaled more at lower amplitudes.
-    let mut output = Vec::with_capacity(out_video.len());
-    for ((&video, &hf), &amp) in out_video.iter().zip(hf_part.iter()).zip(amplitude.iter()) {
-        let static_part = static_gain.map_or(0.0, |gain| hf * gain);
-        let scaled_hf = hf * (1.0 - amp);
-        // And subtract it from the output signal.
-        output.push(video - scaled_hf - static_part);
-    }
+    // Folding the optional static gain into an unconditional multiply (0.0 when
+    // absent) and collecting through the exact-size zip keeps the loop free of
+    // per-sample branches and capacity checks, so it vectorizes.
+    let static_gain = static_gain.unwrap_or(0.0);
+    let output = out_video
+        .iter()
+        .zip(&hf_part)
+        .zip(&amplitude)
+        .map(|((&video, &hf), &amp)| {
+            let scaled_hf = hf * (1.0 - amp);
+            // And subtract it from the output signal.
+            video - scaled_hf - hf * static_gain
+        })
+        .collect();
 
     Ok(output)
 }

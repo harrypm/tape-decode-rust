@@ -579,11 +579,13 @@ fn chromasep_comb(data: &[f32], delay: usize) -> Vec<f32> {
 
     let len = data.len();
     let delay = delay % len;
+    // `(i + len - delay) % len` only wraps for the first `delay` outputs, so
+    // split the walk there: both halves pair contiguous slices, which drops the
+    // per-sample modulo and lets the loops vectorize.
     let mut output = Vec::with_capacity(len);
-    for i in 0..len {
-        let delayed = data[(i + len - delay) % len];
-        output.push((data[i] + delayed) * 0.5);
-    }
+    let comb = |(&a, &b): (&f32, &f32)| (a + b) * 0.5;
+    output.extend(data[..delay].iter().zip(&data[len - delay..]).map(comb));
+    output.extend(data[delay..].iter().zip(&data[..len - delay]).map(comb));
     output
 }
 
