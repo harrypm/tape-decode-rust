@@ -127,11 +127,6 @@ fn sub_deemphasis(
     let mut deviation = spec.video_sub_deemphasis_deviation();
 
     let high_pass_fft = spectrum_times_filter(out_video_fft, nl_high_pass_f);
-    let hf_part = irfft_owned_f32(
-        high_pass_fft,
-        Some(out_video.len()),
-        spec.fft_block_c2r_f32.as_ref(),
-    );
 
     deviation /= 2.0;
     if deviation == 0.0 {
@@ -144,11 +139,22 @@ fn sub_deemphasis(
 
     // Get the instantaneous amplitude of the signal using the hilbert transform
     // and divide by the formats specified deviation so we get a amplitude compared to the specifications references.
+    // The forward transform of `hf_part` is `high_pass_fft` itself (the c2r
+    // inverse below is its exact counterpart), so build the analytic spectrum
+    // straight from it instead of running a redundant r2c. The round trip
+    // would drop the DC and Nyquist imaginary parts; match that here.
     let analytic = {
-        let half = rfft_f32(&hf_part, spec.fft_block_r2c_f32.as_ref());
-        let spectrum = analytic_spectrum(&half, hf_part.len());
+        let n = out_video.len();
+        let mut spectrum = analytic_spectrum(&high_pass_fft, n);
+        spectrum[0].im = 0.0;
+        spectrum[n / 2].im = 0.0;
         ifft_complex_owned_f32(spectrum, spec.fft_block_inverse_f32.as_ref())
     };
+    let hf_part = irfft_owned_f32(
+        high_pass_fft,
+        Some(out_video.len()),
+        spec.fft_block_c2r_f32.as_ref(),
+    );
     // `Complex::norm` calls libm `hypot`, whose overflow-safe scaling is wasted
     // on these bounded analytic samples. Computing the magnitude directly is far
     // cheaper (and matches the `re*re + im*im` idiom used elsewhere).
