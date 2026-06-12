@@ -1,4 +1,5 @@
 #![cfg_attr(nightly_float_algebraic, feature(float_algebraic))]
+#![cfg_attr(nightly_portable_simd, feature(portable_simd))]
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;

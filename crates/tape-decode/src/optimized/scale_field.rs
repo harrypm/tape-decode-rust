@@ -266,7 +266,28 @@ fn scale_field_linear(
         };
         let raw_adjust = level_adjusted(pack_wow_factor(sp.deriv), median, threshold);
         let alpha_raw = alpha * raw_adjust;
-        for eval_index in idx..run_end {
+        let tail_start = {
+            #[cfg(nightly_portable_simd)]
+            {
+                scale_span_simd(
+                    buf,
+                    &mut dsout,
+                    &sp,
+                    idx,
+                    run_end,
+                    eval_scale,
+                    raw_adjust,
+                    &mut smoothed_adjust,
+                    smoothing_enabled,
+                    one_minus_alpha,
+                )
+            }
+            #[cfg(not(nightly_portable_simd))]
+            {
+                idx
+            }
+        };
+        for eval_index in tail_start..run_end {
             let x = eval_index as f64 * eval_scale;
             let b0 = (sp.t1 - x) * sp.inv_h;
             let b1 = (x - sp.t0) * sp.inv_h;
@@ -289,6 +310,102 @@ fn scale_field_linear(
         idx = run_end;
     }
     (dsout, median, mad)
+}
+
+/// Vector body of one degree-1 knot-span run: evaluates `[start, end)` in
+/// 8-wide chunks and returns the first index left for the scalar tail. The
+/// only loop-carried state, the level-adjust EWMA, decays toward the
+/// span-constant raw adjust, so each chunk applies the closed form
+/// `s[j] = raw + (s_prev - raw) * q^j` and the lanes are independent.
+#[cfg(nightly_portable_simd)]
+#[allow(clippy::too_many_arguments)]
+fn scale_span_simd(
+    buf: &[f32],
+    dsout: &mut Vec<f32>,
+    sp: &LinSpan,
+    start: usize,
+    end: usize,
+    eval_scale: f64,
+    raw_adjust: f64,
+    smoothed_adjust: &mut f64,
+    smoothing_enabled: bool,
+    one_minus_alpha: f64,
+) -> usize {
+    use std::simd::prelude::*;
+    use std::simd::StdFloat;
+
+    const LANES: usize = 8;
+    if end - start < LANES {
+        return start;
+    }
+    // The eval_index == 0 reset cannot occur here: the main walk starts at
+    // lineoffset_out_samples, which is at least one output line.
+    debug_assert!(start > 0);
+
+    let iota = Simd::from_array([0.0f64, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]);
+    let mut qpow = [0.0f64; LANES];
+    if smoothing_enabled {
+        let mut q = 1.0;
+        for entry in &mut qpow {
+            q *= one_minus_alpha;
+            *entry = q;
+        }
+    }
+    let qpow = Simd::from_array(qpow);
+    let t1 = Simd::splat(sp.t1);
+    let t0 = Simd::splat(sp.t0);
+    let inv_h = Simd::splat(sp.inv_h);
+    let c0 = Simd::splat(sp.c0);
+    let c1 = Simd::splat(sp.c1);
+    let scale = Simd::splat(eval_scale);
+    let raw = Simd::splat(raw_adjust);
+    let one = Simd::splat(1usize);
+
+    let mut eval = start;
+    while eval + LANES <= end {
+        let x = (Simd::splat(eval as f64) + iota) * scale;
+        let b0 = (t1 - x) * inv_h;
+        let b1 = (x - t0) * inv_h;
+        let coord = b0 * c0 + b1 * c1;
+        let level_adjust: Simd<f32, LANES> = if smoothing_enabled {
+            let s = raw + Simd::splat(*smoothed_adjust - raw_adjust) * qpow;
+            *smoothed_adjust = s[LANES - 1];
+            s.cast()
+        } else {
+            raw.cast()
+        };
+        // Establish the tap window bounds in the float domain (a NaN coordinate
+        // fails the comparison and panics here too), which licenses the direct
+        // truncating conversion and the unchecked gathers below: the saturating
+        // cast and per-lane bounds masks otherwise scalarize the index setup.
+        assert!(
+            coord.reduce_min() >= 1.0 && coord.reduce_max() + 3.0 <= buf.len() as f64,
+            "wow coordinate outside the field buffer"
+        );
+        // SAFETY: every lane is within [1.0, buf.len() - 3.0] per the assert.
+        let ci: Simd<usize, LANES> = unsafe { coord.to_int_unchecked::<isize>() }.cast();
+        let frac: Simd<f32, LANES> = (coord - ci.cast::<f64>()).cast();
+        let yes = Mask::splat(true);
+        let zero = Simd::splat(0.0f32);
+        // SAFETY: indices ci - 1 ..= ci + 2 are in bounds per the assert above.
+        let (p0, p1, p2, p3) = unsafe {
+            (
+                Simd::gather_select_unchecked(buf, yes, ci - one, zero),
+                Simd::gather_select_unchecked(buf, yes, ci, zero),
+                Simd::gather_select_unchecked(buf, yes, ci + one, zero),
+                Simd::gather_select_unchecked(buf, yes, ci + one + one, zero),
+            )
+        };
+        let a = p2 - p0;
+        let b = Simd::splat(2.0f32) * p0 - Simd::splat(5.0f32) * p1 + Simd::splat(4.0f32) * p2
+            - p3;
+        let c = Simd::splat(3.0f32) * (p1 - p2) + p3 - p0;
+        let poly = c.mul_add(frac, b).mul_add(frac, a);
+        let value = (Simd::splat(0.5f32) * frac).mul_add(poly, p1);
+        dsout.extend_from_slice(&(level_adjust * value).to_array());
+        eval += LANES;
+    }
+    eval
 }
 
 fn scale_field_k<const K: usize>(
