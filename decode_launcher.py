@@ -93,6 +93,22 @@ def _split_user_args(extra_args: str, *, strict: bool = True) -> list[str]:
         return [extra_args]
 
 
+def _arg_writes_raw_output_to_stdout(args: list[str]) -> bool:
+    output_flags = {"--luma-out", "--chroma-out"}
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token in output_flags:
+            if i + 1 < len(args) and args[i + 1] == "-":
+                return True
+            i += 2
+            continue
+        if any(token == f"{flag}=-" for flag in output_flags):
+            return True
+        i += 1
+    return False
+
+
 def _extract_dropped_file_path(mime_data, *, suffix_filter: Optional[set[str]] = None) -> Optional[str]:
     if mime_data is None:
         return None
@@ -272,16 +288,21 @@ class DecodeLauncherWindow(QWidget):
         self.frequency_edit = QLineEdit("40")
         self.input_format_combo = QComboBox()
         self.input_format_combo.addItems(INPUT_FORMATS)
-        self.input_format_combo.setCurrentText("u8")
+        self.input_format_combo.setCurrentText("flac")
 
         self.threads_spin = QSpinBox()
         self.threads_spin.setRange(0, 64)
         self.threads_spin.setValue(4)
+        self.mt_distance_size_spin = QSpinBox()
+        self.mt_distance_size_spin.setRange(1, 1000000)
+        self.mt_distance_size_spin.setValue(60)
 
         self.include_chroma_check = QCheckBox("Write chroma output (_chroma.tbc)")
         self.include_chroma_check.setChecked(True)
         self.include_metadata_check = QCheckBox("Write metadata output (.tbc.json)")
         self.include_metadata_check.setChecked(True)
+        self.ire0_adjust_check = QCheckBox("Adjust RF IRE0 (--ire0-adjust)")
+        self.ire0_adjust_check.setChecked(True)
 
         self.overwrite_check = QCheckBox("Allow overwrite (--overwrite)")
         self.debug_check = QCheckBox("Enable debug logging (--debug)")
@@ -338,20 +359,22 @@ class DecodeLauncherWindow(QWidget):
 
         launch_layout.addWidget(QLabel("Threads (0 = serial)"), 7, 0)
         launch_layout.addWidget(self.threads_spin, 7, 1)
+        launch_layout.addWidget(QLabel("MT distance size"), 7, 2)
+        launch_layout.addWidget(self.mt_distance_size_spin, 7, 3)
 
         launch_layout.addWidget(self.include_chroma_check, 8, 0, 1, 2)
         launch_layout.addWidget(self.include_metadata_check, 8, 2, 1, 2)
-
         launch_layout.addWidget(self.overwrite_check, 9, 0, 1, 2)
-        launch_layout.addWidget(self.debug_check, 9, 2, 1, 2)
+        launch_layout.addWidget(self.ire0_adjust_check, 9, 2, 1, 2)
+        launch_layout.addWidget(self.debug_check, 10, 0, 1, 2)
 
-        launch_layout.addWidget(QLabel("Extra arguments"), 10, 0)
-        launch_layout.addWidget(self.extra_args_edit, 10, 1, 1, 3)
+        launch_layout.addWidget(QLabel("Extra arguments"), 11, 0)
+        launch_layout.addWidget(self.extra_args_edit, 11, 1, 1, 3)
 
-        launch_layout.addWidget(QLabel("Terminal preview"), 11, 0)
-        launch_layout.addWidget(self.command_preview, 11, 1, 1, 3)
+        launch_layout.addWidget(QLabel("Terminal preview"), 12, 0)
+        launch_layout.addWidget(self.command_preview, 12, 1, 1, 3)
 
-        launch_layout.addWidget(self.note_label, 12, 0, 1, 4)
+        launch_layout.addWidget(self.note_label, 13, 0, 1, 4)
 
         action_row = QHBoxLayout()
         action_row.addWidget(self.launch_button)
@@ -373,8 +396,10 @@ class DecodeLauncherWindow(QWidget):
         self.frequency_edit.textChanged.connect(self._refresh_tool_state)
         self.input_format_combo.currentIndexChanged.connect(self._refresh_tool_state)
         self.threads_spin.valueChanged.connect(self._refresh_tool_state)
+        self.mt_distance_size_spin.valueChanged.connect(self._refresh_tool_state)
         self.include_chroma_check.toggled.connect(self._refresh_tool_state)
         self.include_metadata_check.toggled.connect(self._refresh_tool_state)
+        self.ire0_adjust_check.toggled.connect(self._refresh_tool_state)
         self.overwrite_check.toggled.connect(self._refresh_tool_state)
         self.debug_check.toggled.connect(self._refresh_tool_state)
         self.extra_args_edit.textChanged.connect(self._refresh_tool_state)
@@ -429,8 +454,10 @@ class DecodeLauncherWindow(QWidget):
             self.frequency_edit,
             self.input_format_combo,
             self.threads_spin,
+            self.mt_distance_size_spin,
             self.include_chroma_check,
             self.include_metadata_check,
+            self.ire0_adjust_check,
             self.overwrite_check,
             self.debug_check,
             self.use_profile_file_check,
@@ -505,9 +532,12 @@ class DecodeLauncherWindow(QWidget):
         threads = self.threads_spin.value()
         if threads > 0:
             args += ["--mt-threads", str(threads)]
+            args += ["--mt-distance-size", str(self.mt_distance_size_spin.value())]
 
         if self.overwrite_check.isChecked():
             args.append("--overwrite")
+        if self.ire0_adjust_check.isChecked():
+            args.append("--ire0-adjust")
         if self.debug_check.isChecked():
             args.append("--debug")
 
@@ -526,7 +556,13 @@ class DecodeLauncherWindow(QWidget):
 
         extra = self.extra_args_edit.text().strip()
         if extra:
-            args += _split_user_args(extra, strict=strict)
+            extra_args = _split_user_args(extra, strict=strict)
+            if _arg_writes_raw_output_to_stdout(extra_args):
+                raise RuntimeError(
+                    "Decode Launcher cannot use --luma-out - / --chroma-out - in Extra arguments. "
+                    "Use Output base file paths in the form, or run a manual shell pipeline outside launcher."
+                )
+            args += extra_args
 
         if input_path:
             args.append(input_path)
@@ -562,6 +598,7 @@ class DecodeLauncherWindow(QWidget):
             self,
             "Select input RF file",
             self.input_edit.text().strip() or str(self._effective_working_directory()),
+            "RF captures (*.flac *.lds *.u8 *.s8 *.s16le *.u16le *.f32le *.raw *.bin);;All files (*)",
         )
         if selected:
             self.input_edit.setText(selected)
@@ -595,7 +632,7 @@ class DecodeLauncherWindow(QWidget):
             output_path = self._effective_working_directory() / output_path
         output_path = output_path.resolve(strict=False)
 
-        if output_path.suffix.lower() == ".tbc":
+        if output_path.suffix.lower() in {".tbc", ".lds"}:
             return output_path
         return Path(str(output_path) + ".tbc")
 
