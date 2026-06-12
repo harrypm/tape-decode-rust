@@ -1034,38 +1034,38 @@ fn cubic_resample(data: &[f32], input_rate: usize, output_rate: usize) -> Vec<f3
     // `p`. The four Catmull-Rom tap weights are a function of that offset alone,
     // so precompute one weight set (and integer tap offset) per phase and reduce
     // the per-output work to a table lookup and four multiply-adds, instead of
-    // re-deriving the cubic (and an f64 floor) for every sample.
-    let phases: Vec<(usize, [f32; 4])> = (0..output_rate)
-        .map(|p| {
-            let pos = p as f64 * scale;
-            let idx_off = pos.floor();
-            let f = (pos - idx_off) as f32;
-            let f2 = f * f;
-            let f3 = f2 * f;
-            let weights = [
-                -0.5 * f3 + f2 - 0.5 * f,
-                1.5 * f3 - 2.5 * f2 + 1.0,
-                -1.5 * f3 + 2.0 * f2 + 0.5 * f,
-                0.5 * f3 - 0.5 * f2,
-            ];
-            (idx_off as usize, weights)
-        })
-        .collect();
+    // re-deriving the cubic (and an f64 floor) for every sample. The tables are
+    // laid out per tap so the interior kernel loads weights as contiguous runs.
+    let mut tap_offsets: Vec<usize> = Vec::with_capacity(output_rate);
+    let mut tap_weights: [Vec<f32>; 4] = std::array::from_fn(|_| Vec::with_capacity(output_rate));
+    for p in 0..output_rate {
+        let pos = p as f64 * scale;
+        let idx_off = pos.floor();
+        let f = (pos - idx_off) as f32;
+        let f2 = f * f;
+        let f3 = f2 * f;
+        tap_offsets.push(idx_off as usize);
+        tap_weights[0].push(-0.5 * f3 + f2 - 0.5 * f);
+        tap_weights[1].push(1.5 * f3 - 2.5 * f2 + 1.0);
+        tap_weights[2].push(-1.5 * f3 + 2.0 * f2 + 0.5 * f);
+        tap_weights[3].push(0.5 * f3 - 0.5 * f2);
+    }
 
     // Tap index of output `i`; nondecreasing in `i`, so the outputs whose
     // 4-tap window leaves the input form a head and a tail around an interior
     // that needs no clamping.
     let idx_at = |i: usize| -> isize {
-        (i / output_rate * input_rate) as isize + phases[i % output_rate].0 as isize
+        (i / output_rate * input_rate) as isize + tap_offsets[i % output_rate] as isize
     };
     let clamped_at = |i: usize| -> f32 {
-        let (_, w) = &phases[i % output_rate];
+        let p = i % output_rate;
         let idx = idx_at(i);
         let p0 = sample_clamped(data, idx - 1);
         let p1 = sample_clamped(data, idx);
         let p2 = sample_clamped(data, idx + 1);
         let p3 = sample_clamped(data, idx + 2);
-        w[0] * p0 + w[1] * p1 + w[2] * p2 + w[3] * p3
+        tap_weights[0][p] * p0 + tap_weights[1][p] * p1 + tap_weights[2][p] * p2
+            + tap_weights[3][p] * p3
     };
     let head_end = (0..out_len).find(|&i| idx_at(i) >= 1).unwrap_or(out_len);
     let in_window = |i: usize| idx_at(i) + 2 < data.len() as isize;
@@ -1087,19 +1087,43 @@ fn cubic_resample(data: &[f32], input_rate: usize, output_rate: usize) -> Vec<f3
     out.extend((0..head_end).map(clamped_at));
     // The interior walks whole phase cycles: a single slice index per output
     // replaces the four per-tap clamps, and the inner loop carries no phase
-    // wrap check.
+    // wrap check. The tap offsets are nondecreasing within a cycle, so each
+    // run's window extremes sit at its endpoints; checking them once licenses
+    // the unchecked gathers in the vector kernel.
     let mut i = head_end;
     let mut phase = head_end % output_rate;
     let mut base = head_end / output_rate * input_rate;
     while i < tail_start {
         let run = (tail_start - i).min(output_rate - phase);
-        for (idx_off, w) in &phases[phase..phase + run] {
-            let s = base + idx_off;
+        let phase_end = phase + run;
+        let lo = base + tap_offsets[phase];
+        let hi = base + tap_offsets[phase_end - 1];
+        assert!(
+            lo >= 1 && hi + 2 < data.len(),
+            "resample window outside the input"
+        );
+        let tail = {
+            #[cfg(nightly_portable_simd)]
+            {
+                resample_run_simd(data, &mut out, base, &tap_offsets[..phase_end], &tap_weights, phase)
+            }
+            #[cfg(not(nightly_portable_simd))]
+            {
+                phase
+            }
+        };
+        for p in tail..phase_end {
+            let s = base + tap_offsets[p];
             let window = &data[s - 1..s + 3];
-            out.push(w[0] * window[0] + w[1] * window[1] + w[2] * window[2] + w[3] * window[3]);
+            out.push(
+                tap_weights[0][p] * window[0]
+                    + tap_weights[1][p] * window[1]
+                    + tap_weights[2][p] * window[2]
+                    + tap_weights[3][p] * window[3],
+            );
         }
         i += run;
-        phase += run;
+        phase = phase_end;
         if phase == output_rate {
             phase = 0;
             base += input_rate;
@@ -1107,6 +1131,50 @@ fn cubic_resample(data: &[f32], input_rate: usize, output_rate: usize) -> Vec<f3
     }
     out.extend((tail_start..out_len).map(clamped_at));
     out
+}
+
+/// Vector body of one resample phase run: evaluates phases `[start,
+/// tap_offsets.len())` in 8-wide chunks against the fixed tap base and returns
+/// the first phase left for the scalar tail. The caller has checked the run's
+/// whole window range against the input bounds.
+#[cfg(nightly_portable_simd)]
+fn resample_run_simd(
+    data: &[f32],
+    out: &mut Vec<f32>,
+    base: usize,
+    tap_offsets: &[usize],
+    tap_weights: &[Vec<f32>; 4],
+    start: usize,
+) -> usize {
+    use std::simd::prelude::*;
+
+    const LANES: usize = 8;
+    let end = tap_offsets.len();
+    let base_v = Simd::splat(base);
+    let yes = Mask::splat(true);
+    let zero = Simd::splat(0.0f32);
+    let one = Simd::splat(1usize);
+    let mut p = start;
+    while p + LANES <= end {
+        let s = base_v + Simd::<usize, LANES>::from_slice(&tap_offsets[p..]);
+        let w0 = Simd::<f32, LANES>::from_slice(&tap_weights[0][p..]);
+        let w1 = Simd::<f32, LANES>::from_slice(&tap_weights[1][p..]);
+        let w2 = Simd::<f32, LANES>::from_slice(&tap_weights[2][p..]);
+        let w3 = Simd::<f32, LANES>::from_slice(&tap_weights[3][p..]);
+        // SAFETY: the run's tap windows are in bounds per the caller's check.
+        let (p0, p1, p2, p3) = unsafe {
+            (
+                Simd::gather_select_unchecked(data, yes, s - one, zero),
+                Simd::gather_select_unchecked(data, yes, s, zero),
+                Simd::gather_select_unchecked(data, yes, s + one, zero),
+                Simd::gather_select_unchecked(data, yes, s + one + one, zero),
+            )
+        };
+        let acc = w0 * p0 + w1 * p1 + w2 * p2 + w3 * p3;
+        out.extend_from_slice(&acc.to_array());
+        p += LANES;
+    }
+    p
 }
 
 fn sample_clamped(data: &[f32], idx: isize) -> f32 {
