@@ -1,38 +1,38 @@
-//! Algebraic float operations: on nightly these carry the LLVM fast-math
-//! flags that license reassociation and contraction (so reductions vectorize
-//! and chains fuse), while on stable they fall back to the strict operations.
+//! Vectorizable math kernels: explicit-SIMD and branch-free scalar routines
+//! for the hot per-sample loops.
 
-#[inline(always)]
-pub(crate) fn fadd_algebraic(a: f32, b: f32) -> f32 {
-    #[cfg(nightly_float_algebraic)]
-    {
-        a.algebraic_add(b)
-    }
-    #[cfg(not(nightly_float_algebraic))]
-    {
-        a + b
-    }
-}
-
-/// Sum with reassociation allowed, so the reduction vectorizes instead of
-/// running as one serial carried add. The lane accumulators make the data
-/// parallelism explicit; a plain `fold` over `fadd_algebraic` still compiled
-/// to one serial carried add.
+/// Sum evaluated 16 lanes wide instead of as one serial carried add. The
+/// vector accumulator is explicit `Simd` (or strict per-lane adds on stable):
+/// expressing the lanes through reassociation-licensed adds let the compiler
+/// legally fold them back into a serial chain, which it did.
 #[inline]
 pub(crate) fn sum_algebraic(values: &[f32]) -> f32 {
     const LANES: usize = 16;
-    let mut acc = [0.0f32; LANES];
     let mut chunks = values.chunks_exact(LANES);
-    for chunk in &mut chunks {
-        for (lane, &value) in acc.iter_mut().zip(chunk) {
-            *lane = fadd_algebraic(*lane, value);
+    let lanes_total = {
+        #[cfg(nightly_portable_simd)]
+        {
+            use std::simd::num::SimdFloat;
+            use std::simd::Simd;
+            let mut acc = Simd::<f32, LANES>::splat(0.0);
+            for chunk in &mut chunks {
+                acc += Simd::from_slice(chunk);
+            }
+            acc.reduce_sum()
         }
-    }
-    let tail = chunks
-        .remainder()
-        .iter()
-        .fold(0.0, |sum, &value| fadd_algebraic(sum, value));
-    acc.iter().fold(tail, |sum, &lane| fadd_algebraic(sum, lane))
+        #[cfg(not(nightly_portable_simd))]
+        {
+            let mut acc = [0.0f32; LANES];
+            for chunk in &mut chunks {
+                for (lane, &value) in acc.iter_mut().zip(chunk) {
+                    *lane += value;
+                }
+            }
+            acc.iter().sum()
+        }
+    };
+    let tail: f32 = chunks.remainder().iter().sum();
+    lanes_total + tail
 }
 
 /// exp2(y) for `y` within the normal-exponent range: split into an integer
