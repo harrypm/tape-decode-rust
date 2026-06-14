@@ -3,6 +3,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::marker::PhantomData;
 
 use anyhow::{bail, Context as _, Result};
+use tracing::error;
 use symphonia_core::io::{MediaSource, MediaSourceStream, ReadBytes};
 
 /// Input encoding. The raw formats widen straight to `f32` with no rescaling
@@ -190,18 +191,36 @@ fn raw<F: SampleEncoding + 'static>(source: Box<dyn MediaSource>) -> Result<Box<
 /// so this layer is format- and transport-agnostic.
 pub struct DecodeReader {
     source: Box<dyn SampleSource>,
+    eof: bool,
 }
 
 impl DecodeReader {
     pub fn new(source: Box<dyn SampleSource>) -> Self {
-        Self { source }
+        Self { source, eof: false }
     }
 
     pub fn read(&mut self, out: &mut [f32]) -> Result<usize> {
-        self.source.read(out)
+        if self.eof {
+            return Ok(0);
+        }
+        match self.source.read(out) {
+            Ok(n) => Ok(n),
+            Err(e) => {
+                error!("{e:#}");
+                self.eof = true;
+                Ok(0)
+            }
+        }
     }
 
     pub fn seek_samples(&mut self, sample: u64) -> Result<()> {
-        self.source.seek_samples(sample)
+        if self.eof {
+            return Ok(());
+        }
+        if let Err(e) = self.source.seek_samples(sample) {
+            error!("{e:#}");
+            self.eof = true;
+        }
+        Ok(())
     }
 }
