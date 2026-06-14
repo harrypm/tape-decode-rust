@@ -135,9 +135,10 @@ pub struct DecoderSpec {
     pub(crate) fft_field_inverse_f32: Arc<dyn Fft<f32>>,
 
     pub(crate) resync_divisor: usize,
-    pub(crate) resync_vsync_env_filter: Vec<Sos<f64>>,
-    pub(crate) resync_serration_filter_base: [Vec<Sos<f64>>; 2],
-    pub(crate) resync_serration_filter_envelope: Vec<Sos<f64>>,
+    pub(crate) resync_vsync_env_decimation: usize,
+    pub(crate) resync_vsync_env_filter: Vec<Sos<f32>>,
+    pub(crate) resync_serration_filter_base: [Vec<Sos<f32>>; 2],
+    pub(crate) resync_serration_filter_envelope: Vec<Sos<f32>>,
 
     pub(crate) ntscj: bool,
     pub(crate) track_phase: Option<i64>,
@@ -553,13 +554,22 @@ impl DecoderSpec {
         let fh = sys_params.fps * sys_params.frame_lines.line_count() as f64;
         let venv_limit = 5.0;
         let serration_limit = 3.0;
-        let resync_vsync_env_filter = iir_lowpass_sos(samp_rate, fv * venv_limit, 1e3, 20)?;
+        let env_cutoff = fv * venv_limit;
+        // The per-field envelope lowpass sits near the field rate, leaving it
+        // hugely oversampled at the working rate. Run it on a heavily decimated
+        // copy of the rectified signal so it stays well above its own cutoff,
+        // keeping its poles clear of the unit circle. Clamp the factor so it
+        // never collapses to no decimation.
+        let resync_vsync_env_decimation = ((samp_rate / env_cutoff) / 60.0).floor().max(1.0) as usize;
+        let env_samp_rate = samp_rate / resync_vsync_env_decimation as f64;
+        let resync_vsync_env_filter =
+            store_sos_filter(iir_lowpass_sos(env_samp_rate, env_cutoff, 1e3, 20)?);
         let resync_serration_filter_base = [
-            iir_highpass_sos(samp_rate, fh, fh, 20)?,
-            iir_lowpass_sos(samp_rate, fh, fh, 20)?,
+            store_sos_filter(iir_highpass_sos(samp_rate, fh, fh, 20)?),
+            store_sos_filter(iir_lowpass_sos(samp_rate, fh, fh, 20)?),
         ];
         let resync_serration_filter_envelope =
-            iir_lowpass_sos(samp_rate, fh / serration_limit, fh / 2.0, 20)?;
+            store_sos_filter(iir_lowpass_sos(samp_rate, fh / serration_limit, fh / 2.0, 20)?);
 
         let track_phase = request.track_phase;
         if let Some(track_phase) = track_phase {
@@ -675,6 +685,7 @@ impl DecoderSpec {
             fft_field_inverse_f32,
 
             resync_divisor,
+            resync_vsync_env_decimation,
             resync_vsync_env_filter,
             resync_serration_filter_base,
             resync_serration_filter_envelope,

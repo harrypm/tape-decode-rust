@@ -38,16 +38,6 @@ pub(crate) fn narrow_sos(sos: &[Sos<f64>]) -> Vec<Sos<f32>> {
         .collect()
 }
 
-/// Forward/backward (zero-phase) SOS filter run in f64, for the sync-detection
-/// path. The serration/vsync timing is too sensitive to tolerate the rounding
-/// of the f32 variant, but the f64 cascade runs on the same hand-rolled stack
-/// dispatch as the f32 path (the sci-rs `sosfiltfilt_dyn` fallback, with its
-/// nalgebra padding and matrix solve, is reserved for cascades too large for
-/// the stack).
-pub(crate) fn sosfiltfilt_f64(sos: &[Sos<f64>], input: &[f64]) -> Vec<f64> {
-    sosfiltfilt(sos, input)
-}
-
 pub(crate) fn sosfiltfilt_f32(sos: &[Sos<f32>], input_array: &[f32]) -> Vec<f32> {
     #[cfg(nightly_portable_simd)]
     if sos.len() == 1 && sos[0].b[2] == 0.0 && sos[0].a[2] == 0.0 {

@@ -1768,7 +1768,7 @@ fn median_slice<T: Float>(values: &[T]) -> f64 {
     median_from_values(&mut values)
 }
 
-fn argrelmin(data: &[f64]) -> Vec<i64> {
+fn argrelmin(data: &[f32]) -> Vec<i64> {
     let n = data.len();
     if n == 0 {
         return Vec::new();
@@ -1904,36 +1904,131 @@ fn vsyncserration_search_eq_pulses(
     (true, Some(data_s), Some(levels))
 }
 
-fn vsync_serration_filt(sos: &[Sos<f64>], x: &[f64]) -> Vec<f64> {
-    sosfiltfilt_f64(sos, x)
+fn vsync_serration_filt(sos: &[Sos<f32>], x: &[f32]) -> Vec<f32> {
+    sosfiltfilt_f32(sos, x)
 }
 
 // Builds the vsync envelope (lowpass of the rectified signal, plus the
 // signal minimum) in forward and reverse direction, then assembles both
-// halves to avoid edge distortion from very-low-cutoff filters.
-fn vsync_envelope_double(config: &DecoderSpec, data: &[f64]) -> (Vec<f64>, f64) {
-    let half = data.len() / 2;
-    let mut forward1 = f64::INFINITY;
-    let hi_part: Vec<f64> = data
-        .iter()
-        .map(|&x| {
-            let clamped = x.max(0.0);
-            forward1 = forward1.min(clamped);
-            clamped
-        })
-        .collect();
-    let forward0 = vsync_serration_filt(&config.resync_vsync_env_filter, &hi_part);
-    let flipped: Vec<f64> = hi_part.iter().rev().copied().collect();
-    let rev_filt = vsync_serration_filt(&config.resync_vsync_env_filter, &flipped);
-    let reverse: Vec<f64> = rev_filt.iter().rev().copied().collect();
-    let mut result = hi_part;
-    result[..half].copy_from_slice(&reverse[..half]);
-    result[half..].copy_from_slice(&forward0[half..]);
-    (result, forward1)
+// halves to avoid edge distortion from the very-low-cutoff envelope filter.
+//
+// The envelope lowpass would have its poles pinned against the unit circle at
+// the working rate, so it instead runs on a block-averaged decimation of the
+// rectified signal where its cutoff sits well below the (reduced) Nyquist. The
+// block average is the anti-alias filter; sums accumulate in higher precision.
+// The result is interpolated back to full resolution — only the positions of
+// its minima are consumed, and the consumer tolerates a wide search window.
+fn vsync_envelope_double(config: &DecoderSpec, data: &[f32]) -> (Vec<f32>, f32) {
+    let n = data.len();
+    // The minimum of the rectified signal is the minimum of the raw signal
+    // clamped at zero: a negative sample rectifies to zero, the smallest value
+    // a rectified sample can take. A plain min reduction vectorizes cleanly.
+    let signal_min = data.iter().copied().fold(f32::INFINITY, f32::min).max(0.0);
+
+    let decimation = config.resync_vsync_env_decimation;
+    let env_filter = &config.resync_vsync_env_filter;
+
+    // Only reached when the working rate is already low enough that the filter
+    // is well conditioned; filter the full-rate rectified signal in place.
+    if decimation <= 1 {
+        let rectified: Vec<f32> = data.iter().map(|&x| x.max(0.0)).collect();
+        let half = n / 2;
+        let forward = sosfiltfilt_f32(env_filter, &rectified);
+        let flipped: Vec<f32> = rectified.iter().rev().copied().collect();
+        let reverse = sosfiltfilt_f32(env_filter, &flipped);
+        let mut envelope = rectified;
+        for (dst, &src) in envelope[..half].iter_mut().zip(reverse.iter().rev()) {
+            *dst = src;
+        }
+        envelope[half..].copy_from_slice(&forward[half..]);
+        return (envelope, signal_min);
+    }
+
+    // Block-average the rectified signal down to the decimated rate. The block
+    // average doubles as the anti-alias filter; the rectification is folded into
+    // this pass, and eight interleaved accumulators keep the higher-precision
+    // running sums independent so they pipeline instead of serializing.
+    let block_count = n / decimation;
+    let mut decimated = Vec::with_capacity(block_count);
+    let mut total = 0.0f64;
+    for block in 0..block_count {
+        let base = block * decimation;
+        let chunk = &data[base..base + decimation];
+        let mut acc = [0.0f64; 8];
+        let mut octs = chunk.chunks_exact(8);
+        for oct in octs.by_ref() {
+            for lane in 0..8 {
+                acc[lane] += f64::from(oct[lane].max(0.0));
+            }
+        }
+        let mut sum: f64 = acc.iter().sum();
+        for &v in octs.remainder() {
+            sum += f64::from(v.max(0.0));
+        }
+        total += sum;
+        decimated.push((sum / decimation as f64) as f32);
+    }
+
+    // The envelope rides on a large DC level whose rounding would swamp the
+    // shallow dips being searched for. Subtract the buffer-wide mean; only
+    // minima positions are read downstream, so it is never added back.
+    let mean = (total / (block_count * decimation) as f64) as f32;
+    for v in &mut decimated {
+        *v -= mean;
+    }
+
+    // Forward and reverse passes stitched at the midpoint suppress the filter's
+    // edge transients, whose impulse response outruns the zero-phase padding.
+    let half = block_count / 2;
+    let forward = sosfiltfilt_f32(env_filter, &decimated);
+    let flipped: Vec<f32> = decimated.iter().rev().copied().collect();
+    let reverse = sosfiltfilt_f32(env_filter, &flipped);
+    let mut stitched = forward;
+    for (dst, &src) in stitched[..half].iter_mut().zip(reverse.iter().rev()) {
+        *dst = src;
+    }
+
+    // Interpolate back to full resolution. Each decimated sample is anchored at
+    // the centroid of its averaging block, so the forward and reverse passes
+    // agree at the stitch point instead of disagreeing by a block width. Filling
+    // one block-segment at a time keeps the inner loop an affine ramp with no
+    // per-sample branch, floor, or data-dependent index, so it vectorizes.
+    let mut envelope = vec![0.0f32; n];
+    let offset = (decimation - 1) as f32 / 2.0;
+    let inv = 1.0 / decimation as f32;
+    let last = block_count - 1;
+
+    // Indices at or before the first centroid hold the first decimated sample;
+    // `floor(offset)` is the last such index.
+    let lead_end = ((decimation - 1) / 2).min(n - 1);
+    envelope[..=lead_end].fill(stitched[0]);
+    let mut idx = lead_end + 1;
+
+    for k in 0..last {
+        // Segment k owns the indices whose centroid coordinate floors to k: those
+        // above centroid k and at or below centroid k+1, a block ahead.
+        let seg_end = ((2 * (k + 1) * decimation + decimation - 2) / 2).min(n - 1);
+        if seg_end < idx {
+            continue;
+        }
+        let anchor = k as f32 * decimation as f32 + offset;
+        let base = stitched[k];
+        let slope = (stitched[k + 1] - base) * inv;
+        for (i, out) in (idx..=seg_end).zip(envelope[idx..=seg_end].iter_mut()) {
+            *out = base + slope * (i as f32 - anchor);
+        }
+        idx = seg_end + 1;
+    }
+
+    if idx < n {
+        envelope[idx..].fill(stitched[last]);
+    }
+
+    (envelope, signal_min)
 }
 
 // Measures the harmonics of the EQ pulses.
-fn vsync_power_ratio_search(config: &DecoderSpec, data: &[f64]) -> Vec<i64> {
+fn vsync_power_ratio_search(config: &DecoderSpec, data: &[f32]) -> Vec<i64> {
     let mut first_harmonic = vsync_serration_filt(&config.resync_serration_filter_base[0], data);
     first_harmonic = vsync_serration_filt(&config.resync_serration_filter_base[1], &first_harmonic);
     for v in &mut first_harmonic {
@@ -2135,14 +2230,12 @@ impl VsyncSerrationState {
     // Searches candidate envelope minima in padded data.
     fn vsync_envelope(&mut self, config: &DecoderSpec, data: &[f32], padding: usize) {
         let p = padding.min(data.len());
-        // `data` is the f32 sync buffer. The envelope/serration filtering below
-        // stays in f64 (those are filter outputs whose recurrence precision must
-        // not change), so widen into the f64 `padded` buffer here — lossless
-        // since `data` was f32 to begin with.
-        let mut padded: Vec<f64> = data[..p].iter().rev().map(|&v| f64::from(v)).collect();
-        padded.extend(data.iter().map(|&v| f64::from(v)));
+        // Reflect-pad the front so the very-low-cutoff envelope filter has room
+        // to settle before the real signal begins.
+        let mut padded: Vec<f32> = data[..p].iter().rev().copied().collect();
+        padded.extend_from_slice(data);
         let (forward0, forward1) = vsync_envelope_double(config, &padded);
-        self.sync_level_bias = forward1;
+        self.sync_level_bias = f64::from(forward1);
         let start = padding.min(forward0.len());
         // argrelmin only compares neighbours, so subtracting the constant
         // sync_level_bias would not move any minima; run it on forward0 directly.
@@ -2170,9 +2263,8 @@ impl VsyncSerrationState {
     // Runs one serration measurement pass.
     fn work_impl(&mut self, config: &DecoderSpec, data: &[f32]) {
         self.found_serration = false;
-        // Keep the decimated sync buffer in f32 (the envelope/serration filters
-        // it feeds widen each sample to f64 internally, so this is bit-exact) to
-        // halve it.
+        // Decimate the sync buffer by the resync divisor for the level-detection
+        // pass.
         let downsampled: Vec<f32> = data
             .iter()
             .step_by(config.resync_divisor)

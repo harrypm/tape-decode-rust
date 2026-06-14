@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::optimized::{
     exp_fast, narrow_sos, powf_fast_nonneg, scale_field, sosfilt_f32, sosfiltfilt_f32,
-    sosfiltfilt_f64, sum_algebraic, unwrap_angles, ScaleFieldParams,
+    sum_algebraic, unwrap_angles, ScaleFieldParams,
 };
 use crate::request::{ColorSystem, FieldOrderAction, LineSystem, WowInterpolation};
 use crate::spec::DecoderSpec;
