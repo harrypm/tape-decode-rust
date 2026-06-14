@@ -148,7 +148,7 @@ fn refine_linelocs_hsync(
     let mut linelocs_refined = initial_linelocs.to_vec();
     let mut refined_from_right_lineloc = -1.0;
     let mut prev_porch_level = -1.0;
-    let one_usec_samples = one_usec as f64;
+    let one_usec_samples = spec.freq;
     let normal_hsync_samples = normal_hsync_length as f64;
 
     for i in 0..initial_linelocs.len() {
