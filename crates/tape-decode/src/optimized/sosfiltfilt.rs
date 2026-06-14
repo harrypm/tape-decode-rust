@@ -1,24 +1,11 @@
-use core::iter::Sum;
-use core::ops::SubAssign;
-
-use num_traits::Float;
-use sci_rs::na::{RealField, Scalar};
 use sci_rs::signal::filter::design::Sos;
 use sci_rs::signal::filter::sosfiltfilt_dyn;
 
 const SOSFILTFILT_STACK_MAX_SECTIONS: usize = 12;
 
-/// The float types the SOS runtime here is instantiated for. Bundles the
-/// `num-traits` numeric surface the stack filter needs (`mul_add`, casts) with
-/// the `nalgebra` bounds `Sos<F>` and the sci-rs dynamic fallback require, so
-/// the generic functions can carry a single readable bound.
-pub(crate) trait SosFloat: Float + RealField + Scalar + Sum + SubAssign + Default {}
-impl SosFloat for f32 {}
-impl SosFloat for f64 {}
-
-/// Narrow a designed f64 SOS cascade to the native f32 representation used by
-/// the filter runtime here. Only the coefficients are carried; the steady-state
-/// delay values are re-derived at filter-run time.
+/// Narrow a designed SOS cascade to the representation used by the filter
+/// runtime here. Only the coefficients are carried; the steady-state delay
+/// values are re-derived at filter-run time.
 pub(crate) fn narrow_sos(sos: &[Sos<f64>]) -> Vec<Sos<f32>> {
     sos.iter()
         .map(|section| {
@@ -47,23 +34,21 @@ pub(crate) fn sosfiltfilt_f32(sos: &[Sos<f32>], input_array: &[f32]) -> Vec<f32>
 }
 
 #[inline]
-fn sosfiltfilt<F: SosFloat>(sos: &[Sos<F>], input_array: &[F]) -> Vec<F> {
+fn sosfiltfilt(sos: &[Sos<f32>], input_array: &[f32]) -> Vec<f32> {
     match sos.len() {
-        1 if sos[0].b[2].is_zero() && sos[0].a[2].is_zero() => {
-            sosfiltfilt_order1(&sos[0], input_array)
-        }
-        1 => sosfiltfilt_stack::<1, F>(sos, input_array),
-        2 => sosfiltfilt_stack::<2, F>(sos, input_array),
-        3 => sosfiltfilt_stack::<3, F>(sos, input_array),
-        4 => sosfiltfilt_stack::<4, F>(sos, input_array),
-        5 => sosfiltfilt_stack::<5, F>(sos, input_array),
-        6 => sosfiltfilt_stack::<6, F>(sos, input_array),
-        7 => sosfiltfilt_stack::<7, F>(sos, input_array),
-        8 => sosfiltfilt_stack::<8, F>(sos, input_array),
-        9 => sosfiltfilt_stack::<9, F>(sos, input_array),
-        10 => sosfiltfilt_stack::<10, F>(sos, input_array),
-        11 => sosfiltfilt_stack::<11, F>(sos, input_array),
-        12 => sosfiltfilt_stack::<12, F>(sos, input_array),
+        1 if sos[0].b[2] == 0.0 && sos[0].a[2] == 0.0 => sosfiltfilt_order1(&sos[0], input_array),
+        1 => sosfiltfilt_stack::<1>(sos, input_array),
+        2 => sosfiltfilt_stack::<2>(sos, input_array),
+        3 => sosfiltfilt_stack::<3>(sos, input_array),
+        4 => sosfiltfilt_stack::<4>(sos, input_array),
+        5 => sosfiltfilt_stack::<5>(sos, input_array),
+        6 => sosfiltfilt_stack::<6>(sos, input_array),
+        7 => sosfiltfilt_stack::<7>(sos, input_array),
+        8 => sosfiltfilt_stack::<8>(sos, input_array),
+        9 => sosfiltfilt_stack::<9>(sos, input_array),
+        10 => sosfiltfilt_stack::<10>(sos, input_array),
+        11 => sosfiltfilt_stack::<11>(sos, input_array),
+        12 => sosfiltfilt_stack::<12>(sos, input_array),
         _ => sosfiltfilt_dyn(input_array.iter().copied(), sos),
     }
 }
@@ -84,19 +69,19 @@ fn sosfiltfilt<F: SosFloat>(sos: &[Sos<F>], input_array: &[F]) -> Vec<F> {
 /// difference equation; the precomputed `bff` coefficients and regrouping move
 /// the result a few ULP.
 #[derive(Clone, Copy, Default)]
-struct ReducedBiquad<F> {
-    b0: F,
-    neg_a1: F,
-    neg_a2: F,
-    bff1: F,
-    bff2: F,
-    zi0: F,
-    zi1: F,
+struct ReducedBiquad {
+    b0: f32,
+    neg_a1: f32,
+    neg_a2: f32,
+    bff1: f32,
+    bff2: f32,
+    zi0: f32,
+    zi1: f32,
 }
 
-impl<F: SosFloat> ReducedBiquad<F> {
+impl ReducedBiquad {
     #[inline]
-    fn from_sos(section: &Sos<F>) -> Self {
+    fn from_sos(section: &Sos<f32>) -> Self {
         ReducedBiquad {
             b0: section.b[0],
             neg_a1: -section.a[1],
@@ -110,20 +95,20 @@ impl<F: SosFloat> ReducedBiquad<F> {
 }
 
 #[inline(always)]
-fn reduced_step<F: SosFloat>(section: &mut ReducedBiquad<F>, sample: F) -> F {
+fn reduced_step(section: &mut ReducedBiquad, sample: f32) -> f32 {
     let zi0 = section.zi0;
-    let output = Float::mul_add(section.b0, sample, zi0);
-    let feed = Float::mul_add(section.bff1, sample, section.zi1);
-    section.zi0 = Float::mul_add(section.neg_a1, zi0, feed);
-    section.zi1 = Float::mul_add(section.neg_a2, zi0, section.bff2 * sample);
+    let output = section.b0.mul_add(sample, zi0);
+    let feed = section.bff1.mul_add(sample, section.zi1);
+    section.zi0 = section.neg_a1.mul_add(zi0, feed);
+    section.zi1 = section.neg_a2.mul_add(zi0, section.bff2 * sample);
     output
 }
 
 #[inline(always)]
-fn reduced_sample_stack<const SECTIONS: usize, F: SosFloat>(
-    mut sample: F,
-    sections: &mut [ReducedBiquad<F>; SECTIONS],
-) -> F {
+fn reduced_sample_stack<const SECTIONS: usize>(
+    mut sample: f32,
+    sections: &mut [ReducedBiquad; SECTIONS],
+) -> f32 {
     let mut index = 0;
     while index < SECTIONS {
         sample = reduced_step(&mut sections[index], sample);
@@ -133,9 +118,9 @@ fn reduced_sample_stack<const SECTIONS: usize, F: SosFloat>(
 }
 
 #[inline]
-fn scale_reduced_state<const SECTIONS: usize, F: SosFloat>(
-    sections: &mut [ReducedBiquad<F>; SECTIONS],
-    scale: F,
+fn scale_reduced_state<const SECTIONS: usize>(
+    sections: &mut [ReducedBiquad; SECTIONS],
+    scale: f32,
 ) {
     for section in sections.iter_mut() {
         section.zi0 *= scale;
@@ -144,10 +129,7 @@ fn scale_reduced_state<const SECTIONS: usize, F: SosFloat>(
 }
 
 #[inline]
-fn sosfiltfilt_stack<const SECTIONS: usize, F: SosFloat>(
-    sos: &[Sos<F>],
-    input_array: &[F],
-) -> Vec<F> {
+fn sosfiltfilt_stack<const SECTIONS: usize>(sos: &[Sos<f32>], input_array: &[f32]) -> Vec<f32> {
     debug_assert!(SECTIONS > 0);
     debug_assert!(SECTIONS <= SOSFILTFILT_STACK_MAX_SECTIONS);
     debug_assert_eq!(sos.len(), SECTIONS);
@@ -156,12 +138,12 @@ fn sosfiltfilt_stack<const SECTIONS: usize, F: SosFloat>(
     let edge = ntaps * 3;
     assert!(input_array.len() > edge);
 
-    // Seed the per-section steady-state initial conditions. The solve runs in
-    // f64 internally (it is sensitive to coefficient rounding); the f32 sections
-    // carry the narrowed state for the per-sample recurrence. The input is
-    // DC-centered to ~[-1, 1] at the source, which keeps that recurrence
-    // well-conditioned.
-    let mut init_sections = [Sos::<F>::default(); SECTIONS];
+    // Seed the per-section steady-state initial conditions. The solve runs at
+    // double precision internally (it is sensitive to coefficient rounding) and
+    // the sections carry the narrowed state for the per-sample recurrence. The
+    // input is DC-centered to ~[-1, 1] at the source, which keeps that
+    // recurrence well-conditioned.
+    let mut init_sections = [Sos::<f32>::default(); SECTIONS];
     init_sections.copy_from_slice(sos);
     sosfilt_zi(&mut init_sections);
     // Carry the cascade as reduced biquads: the per-sample recurrence is the same
@@ -170,10 +152,10 @@ fn sosfiltfilt_stack<const SECTIONS: usize, F: SosFloat>(
     // single FMA (see `reduced_step`). This shortens the loop-carried chain
     // without adding work, which matters most for the low-section filters whose
     // chain the out-of-order engine cannot hide behind neighbouring sections.
-    let init_reduced: [ReducedBiquad<F>; SECTIONS] =
+    let init_reduced: [ReducedBiquad; SECTIONS] =
         core::array::from_fn(|i| ReducedBiquad::from_sos(&init_sections[i]));
 
-    let two = F::one() + F::one();
+    let two = 2.0f32;
     let left_end = input_array[0];
     let right_end = input_array[input_array.len() - 1];
 
@@ -195,13 +177,13 @@ fn sosfiltfilt_stack<const SECTIONS: usize, F: SosFloat>(
     // TrustedLen fast path (no per-element capacity check), so the hot loop is
     // as tight as the old indexed writes while skipping the `vec![0.0; total]`
     // zero-fill that was immediately overwritten in full.
-    let mut filtered: Vec<F> = Vec::with_capacity(total);
+    let mut filtered: Vec<f32> = Vec::with_capacity(total);
     filtered.extend(
         input_array
             .iter()
             .map(|&sample| reduced_sample_stack(sample, &mut forward_sections)),
     );
-    filtered.extend((1..=edge).map(|index| -> F {
+    filtered.extend((1..=edge).map(|index| -> f32 {
         let sample = two * right_end - input_array[n - 1 - index];
         reduced_sample_stack(sample, &mut forward_sections)
     }));
@@ -243,7 +225,7 @@ fn sosfiltfilt_stack<const SECTIONS: usize, F: SosFloat>(
 /// successive `zi0`, and `out` becomes a parallel tap. Mathematically identical
 /// to the section recurrence (a precomputed coefficient and regrouped
 /// arithmetic shift the result by a few ULP, well inside the similarity bound).
-fn sosfiltfilt_order1<F: SosFloat>(section: &Sos<F>, input_array: &[F]) -> Vec<F> {
+fn sosfiltfilt_order1(section: &Sos<f32>, input_array: &[f32]) -> Vec<f32> {
     // ntaps = (2*1 + 1) - 1 = 2 for a first-order section; edge = ntaps * 3.
     let edge = 6;
     let n = input_array.len();
@@ -263,13 +245,13 @@ fn sosfiltfilt_order1<F: SosFloat>(section: &Sos<F>, input_array: &[F]) -> Vec<F
 
     // One shortened step: returns the output and advances `zi0` in a single
     // loop-carried FMA.
-    let step = |zi0: &mut F, x: F| -> F {
-        let out = Float::mul_add(b0, x, *zi0);
-        *zi0 = Float::mul_add(neg_a1, *zi0, bff * x);
+    let step = |zi0: &mut f32, x: f32| -> f32 {
+        let out = b0.mul_add(x, *zi0);
+        *zi0 = neg_a1.mul_add(*zi0, bff * x);
         out
     };
 
-    let two = F::one() + F::one();
+    let two = 2.0f32;
     let left_end = input_array[0];
     let right_end = input_array[input_array.len() - 1];
 
@@ -283,7 +265,7 @@ fn sosfiltfilt_order1<F: SosFloat>(section: &Sos<F>, input_array: &[F]) -> Vec<F
     }
 
     let total = n + edge;
-    let mut filtered: Vec<F> = Vec::with_capacity(total);
+    let mut filtered: Vec<f32> = Vec::with_capacity(total);
     filtered.extend(input_array.iter().map(|&sample| step(&mut zi0, sample)));
     filtered.extend(
         (1..=edge).map(|index| step(&mut zi0, two * right_end - input_array[n - 1 - index])),
@@ -445,14 +427,14 @@ fn sosfiltfilt_order1_scan_f32(section: &Sos<f32>, input_array: &[f32]) -> Vec<f
 }
 
 #[inline]
-fn sosfiltfilt_ntaps<F: SosFloat>(sos: &[Sos<F>]) -> usize {
+fn sosfiltfilt_ntaps(sos: &[Sos<f32>]) -> usize {
     let mut bzeros = 0;
     let mut azeros = 0;
     for section in sos {
-        if section.b[2].is_zero() {
+        if section.b[2] == 0.0 {
             bzeros += 1;
         }
-        if section.a[2].is_zero() {
+        if section.a[2] == 0.0 {
             azeros += 1;
         }
     }
@@ -462,34 +444,34 @@ fn sosfiltfilt_ntaps<F: SosFloat>(sos: &[Sos<F>]) -> usize {
 /// Set each section's delay state to the unit-step steady state, scaled by the
 /// running cascade gain (scipy's `sosfilt_zi`) — the state the filter would
 /// settle into if a constant 1.0 had been applied forever. The per-section
-/// solve and the cascade gain run in f64 and the result is narrowed to the f32
-/// state.
+/// solve and the cascade gain run at double precision and the result is
+/// narrowed to the stored state.
 #[inline]
-fn sosfilt_zi<F: SosFloat>(sections: &mut [Sos<F>]) {
+fn sosfilt_zi(sections: &mut [Sos<f32>]) {
     let mut scale = 1.0f64;
     for section in sections.iter_mut() {
         let (zi0, zi1) = sos_section_lfilter_zi(section);
-        section.zi0 = F::from(scale * zi0).unwrap();
-        section.zi1 = F::from(scale * zi1).unwrap();
+        section.zi0 = (scale * zi0) as f32;
+        section.zi1 = (scale * zi1) as f32;
         scale *= sum3(&section.b) / sum3(&section.a);
     }
 }
 
 #[inline]
-fn sos_section_lfilter_zi<F: SosFloat>(section: &Sos<F>) -> (f64, f64) {
+fn sos_section_lfilter_zi(section: &Sos<f32>) -> (f64, f64) {
     // Drop leading zeros in the denominator, then normalize so a[0] == 1.
     // `a0` is the first nonzero coefficient, so dividing by it is always defined.
-    // The solve runs in f64 regardless of `F` (it is sensitive to coefficient
-    // rounding); for an f64 cascade the widening is the identity.
+    // The solve runs at double precision (it is sensitive to coefficient
+    // rounding) and narrows back to the stored state.
     let a_in = [
-        section.a[0].to_f64().unwrap(),
-        section.a[1].to_f64().unwrap(),
-        section.a[2].to_f64().unwrap(),
+        f64::from(section.a[0]),
+        f64::from(section.a[1]),
+        f64::from(section.a[2]),
     ];
     let b_in = [
-        section.b[0].to_f64().unwrap(),
-        section.b[1].to_f64().unwrap(),
-        section.b[2].to_f64().unwrap(),
+        f64::from(section.b[0]),
+        f64::from(section.b[1]),
+        f64::from(section.b[2]),
     ];
     let a_start = a_in
         .iter()
@@ -512,27 +494,21 @@ fn sos_section_lfilter_zi<F: SosFloat>(section: &Sos<F>) -> (f64, f64) {
 
 /// Advance a single biquad section by one sample, returning its output.
 #[inline(always)]
-fn sos_step<F: SosFloat>(section: &mut Sos<F>, sample: F) -> F {
+fn sos_step(section: &mut Sos<f32>, sample: f32) -> f32 {
     // Fused multiply-adds shorten the recurrence's dependency chain and halve
     // the rounding steps. This trades bit-exactness for speed but stays well
     // within the similarity tolerance.
-    // Fully qualify `mul_add`: both `num_traits::Float` and nalgebra's
-    // `ComplexField` are in scope via the `SosFloat` bound and supply one.
-    let output = Float::mul_add(section.b[0], sample, section.zi0);
-    section.zi0 = Float::mul_add(
-        section.b[1],
-        sample,
-        Float::mul_add(-section.a[1], output, section.zi1),
-    );
-    section.zi1 = Float::mul_add(section.b[2], sample, -(section.a[2] * output));
+    let output = section.b[0].mul_add(sample, section.zi0);
+    section.zi0 = section.b[1].mul_add(sample, (-section.a[1]).mul_add(output, section.zi1));
+    section.zi1 = section.b[2].mul_add(sample, -(section.a[2] * output));
     output
 }
 
 #[inline(always)]
-fn sosfilt_sample_stack<const SECTIONS: usize, F: SosFloat>(
-    mut sample: F,
-    sections: &mut [Sos<F>; SECTIONS],
-) -> F {
+fn sosfilt_sample_stack<const SECTIONS: usize>(
+    mut sample: f32,
+    sections: &mut [Sos<f32>; SECTIONS],
+) -> f32 {
     let mut index = 0;
     while index < SECTIONS {
         sample = sos_step(&mut sections[index], sample);
@@ -542,7 +518,7 @@ fn sosfilt_sample_stack<const SECTIONS: usize, F: SosFloat>(
 }
 
 #[inline(always)]
-fn sosfilt_sample_slice<F: SosFloat>(mut sample: F, sections: &mut [Sos<F>]) -> F {
+fn sosfilt_sample_slice(mut sample: f32, sections: &mut [Sos<f32>]) -> f32 {
     for section in sections.iter_mut() {
         sample = sos_step(section, sample);
     }
@@ -593,6 +569,6 @@ fn sosfilt_dynamic(sos: &[Sos<f32>], input: &[f32]) -> Vec<f32> {
 }
 
 #[inline(always)]
-fn sum3<F: SosFloat>(values: &[F; 3]) -> f64 {
-    values.iter().map(|&v| v.to_f64().unwrap()).sum()
+fn sum3(values: &[f32; 3]) -> f64 {
+    values.iter().map(|&v| f64::from(v)).sum()
 }
