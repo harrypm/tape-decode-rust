@@ -1,7 +1,7 @@
 //! FLAC input via symphonia. Decodes a mono FLAC stream to `f32` samples behind
-//! the same [`SampleSource`] interface as the raw formats. Samples are widened to
-//! `f32` at their native bit depth with no rescaling, so a 16-bit FLAC reads
-//! identically to the equivalent raw `s16` capture. File-backed input seeks via
+//! the same [`SampleSource`] interface as the raw formats. Signed integer FLAC
+//! samples are normalized to ~[-1, 1], so a 16-bit FLAC reads identically to the
+//! equivalent raw `s16` capture. File-backed input seeks via
 //! symphonia's binary search; stdin can only skip forward by decoding.
 
 use anyhow::{bail, Context as _, Result};
@@ -26,8 +26,10 @@ struct FlacSource {
     decoder: FlacDecoder,
     track_id: u32,
     /// Right shift undoing symphonia's normalization of samples to the full i32
-    /// range (`32 - bits_per_sample`), recovering the native-depth value.
+    /// range (`32 - bits_per_sample`), then `scale` normalizes the native signed
+    /// integer amplitude to match raw signed PCM input.
     shift: u32,
+    scale: f32,
     /// Whether the source supports real seeking (a regular file); pipes can only
     /// skip forward by decoding.
     seekable: bool,
@@ -71,11 +73,14 @@ impl FlacSource {
         let decoder = FlacDecoder::try_new(&params, &AudioDecoderOptions::default())
             .context("failed to initialize FLAC decoder")?;
 
+        let scale = 1.0 / ((1u64 << (bits - 1)) as f32);
+
         Ok(Self {
             reader,
             decoder,
             track_id,
             shift: 32 - bits,
+            scale,
             seekable,
             pending: Vec::new(),
             pending_pos: 0,
@@ -87,6 +92,7 @@ impl FlacSource {
     /// Decode the next packet into `pending`. Returns false at end of input.
     fn decode_next(&mut self) -> Result<bool> {
         let shift = self.shift;
+        let scale = self.scale;
         loop {
             let Some(packet) = self.reader.next_packet().context("FLAC read error")? else {
                 self.eof = true;
@@ -105,7 +111,7 @@ impl FlacSource {
             let plane = buf.plane(0).expect("mono FLAC has one plane");
             self.pending.clear();
             self.pending
-                .extend(plane.iter().map(|&s| (s >> shift) as f32));
+                .extend(plane.iter().map(|&s| ((s >> shift) as f32) * scale));
             self.pending_pos = 0;
             return Ok(true);
         }
