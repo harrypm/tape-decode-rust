@@ -8,9 +8,9 @@ use crate::request::{ColorSystem, FieldOrderAction, LineSystem, WowInterpolation
 use crate::spec::DecoderSpec;
 use crate::DeterministicHashMap;
 use anyhow::{bail, Context as _, Result};
-use num_traits::{Float, ToPrimitive};
+use num_traits::Float;
 use realfft::{ComplexToReal, RealToComplex};
-use rustfft::num_complex::{Complex32, ComplexFloat};
+use rustfft::num_complex::Complex32;
 use rustfft::Fft;
 use sci_rs::signal::filter::design::{FilterBandType, Sos};
 use serde::{Deserialize, Serialize};

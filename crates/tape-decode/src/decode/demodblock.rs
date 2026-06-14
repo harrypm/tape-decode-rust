@@ -214,61 +214,26 @@ fn sub_deemphasis(
     Ok(output)
 }
 
-// A single blanket impl over `ComplexFloat` covers both the real (`f32`/`f64`)
-// and complex (`Complex32`/`Complex64`) filter coefficients; `re()`/`im()` make
-// the real case a complex value with zero imaginary part. `SpectrumValue`
-// spectrum bins reuse the same accessors.
-trait SpectrumFilterSample: Copy {
-    fn re_f32(self) -> f32;
-    fn im_f32(self) -> f32;
-}
-
-impl<T> SpectrumFilterSample for T
-where
-    T: ComplexFloat,
-    T::Real: Float,
-{
-    #[inline(always)]
-    fn re_f32(self) -> f32 {
-        self.re().to_f32().unwrap()
-    }
-
-    #[inline(always)]
-    fn im_f32(self) -> f32 {
-        self.im().to_f32().unwrap()
-    }
-}
-
 #[inline(always)]
-fn multiply_spectrum_sample<T>(sample: Complex32, filter: T) -> Complex32
-where
-    T: SpectrumFilterSample,
-{
+fn multiply_spectrum_sample(sample: Complex32, filter: Complex32) -> Complex32 {
     let sample_re = sample.re;
     let sample_im = sample.im;
-    let filter_re = filter.re_f32();
-    let filter_im = filter.im_f32();
+    let filter_re = filter.re;
+    let filter_im = filter.im;
     Complex32::new(
         sample_re.mul_add(filter_re, -(sample_im * filter_im)),
         sample_re.mul_add(filter_im, sample_im * filter_re),
     )
 }
 
-fn multiply_spectrum_real<T>(spectrum: &mut [Complex32], filter: &[T])
-where
-    T: Float,
-{
+fn multiply_spectrum_real(spectrum: &mut [Complex32], filter: &[f32]) {
     assert_eq!(filter.len(), spectrum.len(), "length mismatch");
     for (sample, &gain) in spectrum.iter_mut().zip(filter) {
-        let gain = gain.to_f32().unwrap();
         *sample = Complex32::new(sample.re * gain, sample.im * gain);
     }
 }
 
-fn spectrum_times_filter<T>(spectrum: &[Complex32], filter: &[T]) -> Vec<Complex32>
-where
-    T: SpectrumFilterSample,
-{
+fn spectrum_times_filter(spectrum: &[Complex32], filter: &[Complex32]) -> Vec<Complex32> {
     assert_eq!(filter.len(), spectrum.len(), "length mismatch");
     spectrum
         .iter()
