@@ -6,7 +6,7 @@ fn demod_burst(
     burst_start: usize,
     burst_len: usize,
     burst_wave: &[(f32, f32)],
-) -> Result<(f64, f64, f64, f64)> {
+) -> Result<(f32, f32, f32, f32)> {
     if burst_len > burst.len() {
         bail!("burst_len exceeds burst length");
     }
@@ -25,8 +25,6 @@ fn demod_burst(
         q += sample * sin;
     }
 
-    let i = f64::from(i);
-    let q = f64::from(q);
     let burst_magnitude = i.hypot(q);
     let burst_phase_deg = q.atan2(i).to_degrees().rem_euclid(360.0);
     Ok((burst_phase_deg, burst_magnitude, i, q))
@@ -438,7 +436,7 @@ fn get_upconverted_burst(
     linenumber: usize,
     lineoffset: usize,
     outwidth: usize,
-) -> Result<(f64, f64, f64, f64)> {
+) -> Result<(f32, f32, f32, f32)> {
     let burst_padding = burstarea.1 - burstarea.0;
     if burst_padding < 0 {
         bail!("burst area end precedes start");
@@ -492,7 +490,7 @@ fn get_phase_sequence(
     chroma_heterodyne: &[Vec<f32>],
     chroma_rotation_starting_index: Option<i64>,
     burstarea: (isize, isize),
-    track_change_threshold: f64,
+    track_change_threshold: f32,
 ) -> Result<(i64, Vec<PhaseSequenceEntry>)> {
     const BURST_CHECK_SKIP_LINES: usize = 16;
 
@@ -607,8 +605,8 @@ fn get_phase_rotation_sequence(
     chroma_heterodyne: &[Vec<f32>],
     chroma_rotation_index: Option<i64>,
     burstarea: (isize, isize),
-) -> Result<(i64, Vec<PhaseSequenceEntry>, Option<f64>)> {
-    const TRACK_CHANGE_THRESHOLD: f64 = 90.0;
+) -> Result<(i64, Vec<PhaseSequenceEntry>, Option<f32>)> {
+    const TRACK_CHANGE_THRESHOLD: f32 = 90.0;
     const BURST_CHECK_SKIP_LINES: isize = 16;
 
     let lineoffset = field.lineoffset + 1;
@@ -938,12 +936,11 @@ pub(crate) fn predecode_field_from_rawdecode(
                                                 - 180.0;
                                             let line_start = refined_linelocs[line_number];
                                             let line_end = refined_linelocs[line_number + 1];
-                                            let line_length = f64::from(line_end - line_start);
+                                            let line_length = line_end - line_start;
                                             let scale =
-                                                line_length / pending_field.outlinelen as f64;
+                                                line_length / pending_field.outlinelen as f32;
                                             let line_adjust = phase_delta / 360.0 * 4.0;
-                                            refined_linelocs[line_number] +=
-                                                (line_adjust * scale) as f32;
+                                            refined_linelocs[line_number] += line_adjust * scale;
                                         }
                                     }
                                 }

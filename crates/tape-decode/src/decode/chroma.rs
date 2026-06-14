@@ -3,16 +3,14 @@ use super::*;
 fn adjust_phase(
     input_data: &[Complex32],
     output_data: &mut [f32],
-    input_phase: f64,
-    target_phase: f64,
+    input_phase: f32,
+    target_phase: f32,
 ) {
     assert_eq!(input_data.len(), output_data.len());
 
     let phase_adjustment = target_phase.to_radians() - input_phase.to_radians();
-    // The rotation factors are computed once in f64 for accuracy, then the
-    // per-sample mix runs in f32 over the already-f32 analytic signal.
-    let rotation_re = phase_adjustment.cos() as f32;
-    let rotation_im = phase_adjustment.sin() as f32;
+    let rotation_re = phase_adjustment.cos();
+    let rotation_im = phase_adjustment.sin();
 
     for (input, output) in input_data.iter().zip(output_data.iter_mut()) {
         *output = input.re * rotation_re - input.im * rotation_im;

@@ -518,7 +518,7 @@ fn demod_mean(data: &[f32], start: i64, end: i64) -> f32 {
     slice.iter().sum::<f32>() / slice.len() as f32
 }
 
-type PhaseSequenceEntry = (usize, usize, f64, f64, f64, f64);
+type PhaseSequenceEntry = (usize, usize, f32, f32, f32, f32);
 
 // Whether any sample in the chunk sits on the given side of the threshold,
 // as a branch-free OR-reduction the compiler vectorizes.
@@ -891,7 +891,7 @@ struct DecodedField {
     valid: bool,
     sync_confidence: i64,
     phase_sequence: Option<Vec<PhaseSequenceEntry>>,
-    burst_phase_avg: Option<f64>,
+    burst_phase_avg: Option<f32>,
     /// Cached `(median, mad)` of the field's wow-factor distribution. These
     /// depend only on the line-location spline, so they are identical for every
     /// channel; `downscale_raw_vec` fills this on the first call and reuses it.
