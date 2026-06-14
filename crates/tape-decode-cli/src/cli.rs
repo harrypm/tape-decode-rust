@@ -902,7 +902,7 @@ fn compare_field(expected: &FieldInfoEntry, actual: &FieldInfoEntry, index: usiz
     diff.bool(&format!("{p}.isDuplicateField"), expected.is_duplicate_field, actual.is_duplicate_field);
     diff.int(&format!("{p}.syncConf"), expected.sync_conf, actual.sync_conf);
     diff.int(&format!("{p}.seqNo"), expected.seq_no, actual.seq_no);
-    diff.float(&format!("{p}.diskLoc"), expected.disk_loc, actual.disk_loc);
+    diff.float(&format!("{p}.diskLoc"), expected.disk_loc.into(), actual.disk_loc.into());
     diff.int(&format!("{p}.fileLoc"), expected.file_loc, actual.file_loc);
     diff.int(&format!("{p}.fieldPhaseID"), expected.field_phase_id, actual.field_phase_id);
     diff.opt_float(&format!("{p}.vitsMetrics.wSNR"), expected.vits_metrics.w_snr, actual.vits_metrics.w_snr);

@@ -850,15 +850,15 @@ impl DecoderSpec {
     }
 
     #[inline]
-    pub(crate) fn bytes_per_field(&self) -> i64 {
-        (self.freq_hz() / (self.sys_fps * 2.0)) as i64 + 1
+    pub(crate) fn bytes_per_field(&self) -> u64 {
+        (self.freq_hz() / (self.sys_fps * 2.0)) as u64 + 1
     }
 
     /// Input samples spanned by one field, used to translate a field distance
     /// into a seek offset for multithreaded decoding.
     #[inline]
     pub fn samples_per_field(&self) -> u64 {
-        self.bytes_per_field().max(1) as u64
+        self.bytes_per_field().max(1)
     }
 
     #[inline]

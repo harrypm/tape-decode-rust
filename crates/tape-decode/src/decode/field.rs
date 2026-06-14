@@ -731,14 +731,14 @@ pub(crate) fn predecode_field_from_rawdecode(
     spec: &DecoderSpec,
     scheduled_prevfield: Option<PrevFieldState>,
     inter_field_state: &mut InterFieldState,
-    scheduled_readloc: i64,
+    scheduled_readloc: u64,
     resync_state: &mut ResyncState,
     chroma_afc_state: &ChromaAfcState,
 ) -> Result<DecodeFieldResult> {
     // Build and classify the next DecodedField from coalesced block data. This is
     // the sync/line-location half of the speculative predecode step; output/TBC
     // conversion and metadata writing remain in the executable orchestrator.
-    let readloc = rawdecode.startloc as i64;
+    let readloc = rawdecode.startloc;
     let mut pending_field = DecodedField {
         data: rawdecode,
         prevfield: scheduled_prevfield,

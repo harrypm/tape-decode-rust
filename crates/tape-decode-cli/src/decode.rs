@@ -21,7 +21,7 @@ pub fn decode_all(
     spec: Arc<DecoderSpec>,
     start_offset: u64,
 ) -> Result<()> {
-    let mut decoder = Decoder::new(Arc::clone(&spec), start_offset as f64);
+    let mut decoder = Decoder::new(Arc::clone(&spec), start_offset);
 
     // Feed the decoder one chunk at a time over a sliding window starting at
     // absolute sample `base` (0, since reading begins at the stream start). A
@@ -302,7 +302,7 @@ impl Tape {
 /// skip its input to. Used to start each worker's window without reading or
 /// seeking earlier input, and to tell the tape how much it may drop.
 fn first_needed_offset(spec: &Arc<DecoderSpec>, start_offset: u64) -> Result<u64> {
-    let mut probe = Decoder::new(Arc::clone(spec), start_offset as f64);
+    let mut probe = Decoder::new(Arc::clone(spec), start_offset);
     Ok(probe.decode(&[], 0, false)?.0)
 }
 
@@ -332,7 +332,7 @@ fn decode_segment(
     tx: &SyncSender<WorkerMsg>,
     stop: &AtomicBool,
 ) -> Result<Option<DecoderMetadata>> {
-    let mut decoder = Decoder::new(Arc::clone(spec), start_offset as f64);
+    let mut decoder = Decoder::new(Arc::clone(spec), start_offset);
     let chunk = spec.readlen() + 4 * BLOCKSIZE;
     let mut window: Vec<f32> = Vec::new();
     let mut read_buffer = vec![0.0f32; chunk];
@@ -619,7 +619,7 @@ impl<'a> MtOrchestrator<'a> {
     /// whether it matches `current_field`. The aligned field is consumed so the
     /// later decoder, if it takes over, resumes immediately after it.
     fn compare_with_next(&mut self, next_seg: u64, current_field: &WriteableField) -> bool {
-        let tol = (self.spf / 2) as i64;
+        let tol = self.spf / 2;
         let file_loc = current_field.info.file_loc;
         let aligned = {
             let Some(worker) = self.pool.get_mut(&next_seg) else {
@@ -629,12 +629,12 @@ impl<'a> MtOrchestrator<'a> {
             // it produced while still locking on).
             while worker
                 .peek()
-                .is_some_and(|g| g.info.file_loc < file_loc - tol)
+                .is_some_and(|g| g.info.file_loc + tol < file_loc)
             {
                 worker.pop();
             }
             match worker.peek() {
-                Some(g) if (g.info.file_loc - file_loc).abs() <= tol => worker.pop().unwrap(),
+                Some(g) if g.info.file_loc.abs_diff(file_loc) <= tol => worker.pop().unwrap(),
                 // `next` has no field at this location yet (or is finished).
                 _ => return false,
             }
@@ -668,8 +668,8 @@ impl<'a> MtOrchestrator<'a> {
         self.mark_drop_to(current_seg);
 
         loop {
-            let region_start = self.seg_start(next_seg) as i64;
-            let region_end = self.seg_start(next_seg + 1) as i64;
+            let region_start = self.seg_start(next_seg);
+            let region_end = self.seg_start(next_seg + 1);
 
             // No further segment exists: the current decoder is the final
             // authority; drain it to end of input.

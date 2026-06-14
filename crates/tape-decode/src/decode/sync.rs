@@ -1583,7 +1583,7 @@ fn try_get_pulses_core(
 
     // Calculate in terms of lines to prevent integer overflow when seeking ahead large amounts.
     let prev_first_hsync_offset_lines = if inter_field_state.prev_first_hsync_readloc != -1 {
-        (inter_field_state.prev_first_hsync_readloc - field.readloc) as f32 / meanlinelen
+        (inter_field_state.prev_first_hsync_readloc - field.readloc as i64) as f32 / meanlinelen
     } else {
         0.0
     };
@@ -1728,7 +1728,7 @@ pub(crate) fn try_get_pulses(
     field.is_first_field = Some(result.is_first_field);
     field.is_progressive_field = Some(result.is_progressive_field);
     if let Some(first_hsync_loc) = result.first_hsync_loc {
-        inter_field_state.prev_first_hsync_readloc = field.readloc;
+        inter_field_state.prev_first_hsync_readloc = field.readloc as i64;
         inter_field_state.prev_first_hsync_loc = first_hsync_loc;
         inter_field_state.prev_first_hsync_diff = result.prev_hsync_diff;
     }

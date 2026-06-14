@@ -618,8 +618,8 @@ pub struct FieldInfoEntry {
     pub is_duplicate_field: bool,
     pub sync_conf: i64,
     pub seq_no: usize,
-    pub disk_loc: f64,
-    pub file_loc: i64,
+    pub disk_loc: f32,
+    pub file_loc: u64,
     #[serde(rename = "fieldPhaseID")]
     pub field_phase_id: i64,
     pub vits_metrics: VitsMetrics,
@@ -826,13 +826,13 @@ struct VideoChannels {
 #[derive(Clone)]
 struct FieldData {
     video: VideoChannels,
-    startloc: usize,
+    startloc: u64,
     input_len: usize,
 }
 
 #[derive(Clone)]
 struct PrevFieldState {
-    readloc: i64,
+    readloc: u64,
     field_number: i64,
     phase_adjust_median: f64,
 }
@@ -864,7 +864,7 @@ impl InterFieldState {
 struct DecodedField {
     data: FieldData,
     prevfield: Option<PrevFieldState>,
-    readloc: i64,
+    readloc: u64,
     inlinelen: f64,
     outlinelen: usize,
     outlinecount: usize,
@@ -1207,7 +1207,8 @@ fn padded_burst_area(spec: &DecoderSpec) -> (isize, isize) {
 // input offset, and the speculative-predecode/field-ordering memory.
 pub struct Decoder {
     spec: Arc<DecoderSpec>,
-    fdoffset: f64,
+    fdoffset: u64,
+    fdoffset_frac: f64,
     inter_field_state: InterFieldState,
     resync_state: ResyncState,
     chroma_afc_state: ChromaAfcState,
@@ -1221,13 +1222,14 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    pub fn new(spec: Arc<DecoderSpec>, fdoffset: f64) -> Self {
+    pub fn new(spec: Arc<DecoderSpec>, fdoffset: u64) -> Self {
         let inter_field_state = InterFieldState::new(spec.track_phase);
         let resync_state = ResyncState::new(&spec);
         let chroma_afc_state = ChromaAfcState::new(&spec);
         Self {
             spec,
             fdoffset,
+            fdoffset_frac: 0.0,
             inter_field_state,
             resync_state,
             chroma_afc_state,
@@ -1287,8 +1289,10 @@ impl Decoder {
                         field_number: field_obj.field_number,
                         phase_adjust_median: field_obj.phase_adjust_median,
                     });
-                let toffset = self.fdoffset + decoded_offset.unwrap_or(0.0);
-                let scheduled_readloc_value = ((toffset - BLOCKCUT as f64) as i64).max(0);
+                let pending_frac = self.fdoffset_frac + decoded_offset.unwrap_or(0.0);
+                let scheduled_readloc_value = (self.fdoffset as i64 - BLOCKCUT as i64
+                    + pending_frac.floor() as i64)
+                    .max(0) as u64;
                 let readloc_block = scheduled_readloc_value as usize / blocksize;
                 let numblocks = (readlen / blocksize) + 2;
                 let block_begin = readloc_block * blocksize;
@@ -1338,7 +1342,7 @@ impl Decoder {
                 }
                 self.pending_result = if completed_blocks {
                     let rawdecode = FieldData {
-                        startloc: (block_begin / usable_blocksize) * usable_blocksize,
+                        startloc: ((block_begin / usable_blocksize) * usable_blocksize) as u64,
                         input_len: video.demod.len(),
                         video,
                     };
@@ -1357,7 +1361,10 @@ impl Decoder {
                 self.has_pending = true;
 
                 if decoded_field.is_some() {
-                    self.fdoffset += decoded_offset.unwrap_or(0.0);
+                    let advanced = self.fdoffset_frac + decoded_offset.unwrap_or(0.0);
+                    let whole = advanced.floor();
+                    self.fdoffset = self.fdoffset.saturating_add_signed(whole as i64);
+                    self.fdoffset_frac = advanced - whole;
                 }
 
                 let decoded_was_none = decoded_field.is_none();
@@ -1441,7 +1448,7 @@ impl Decoder {
                 let mut sync_conf = sync_confidence_from_linelocs(&field_obj)?;
                 let seq_no = self.fields.len() + 1;
                 let disk_loc = roundfloat(field_obj.readloc as f64 / bytes_per_field as f64, 1);
-                let file_loc = (field_obj.readloc as f64).floor() as i64;
+                let file_loc = field_obj.readloc;
 
                 // Field phase ID.
                 let field_phase_id = field_obj.field_phase_id.unwrap_or_else(|| {
@@ -1483,7 +1490,12 @@ impl Decoder {
                     .as_ref()
                     .filter(|prevfi| prevfi.is_first_field == is_first_field)
                 {
-                    let distance_from_previous_field = disk_loc - prevfi.disk_loc;
+                    // Measure the field spacing against the previous field's exact
+                    // sample position rather than its rounded reported location, so
+                    // the progressive-content heuristic does not hinge on the
+                    // reported value's precision.
+                    let distance_from_previous_field =
+                        disk_loc - roundfloat(prevfi.file_loc as f64 / bytes_per_field as f64, 1);
                     if prevfi.detected_first_field == detected_first_field
                         && prevfi_2
                             .as_ref()
@@ -1536,7 +1548,7 @@ impl Decoder {
                     is_duplicate_field,
                     sync_conf,
                     seq_no,
-                    disk_loc,
+                    disk_loc: disk_loc as f32,
                     file_loc,
                     field_phase_id,
                     vits_metrics,
@@ -1572,7 +1584,7 @@ impl Decoder {
             }
         }
 
-        Ok((self.fdoffset as u64, output))
+        Ok((self.fdoffset, output))
     }
 
     pub fn metadata(&self) -> Option<DecoderMetadata> {
