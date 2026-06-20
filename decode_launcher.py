@@ -11,7 +11,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from decode_runtime import build_tape_decode_command, load_profiles
+from decode_runtime import (
+    MICROARCH_AUTO,
+    MICROARCH_LEVELS,
+    build_cargo_command,
+    build_tape_decode_command,
+    cargo_env_for_level,
+    load_profiles,
+    microarch_target_cpu,
+    microarch_target_dir,
+    native_host_arch,
+    normalize_microarch_level,
+    resolve_tape_decode_prefix,
+)
 
 try:
     from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
@@ -72,6 +84,12 @@ TOOLS = [
 
 INPUT_FORMATS = ["u8", "s8", "s16le", "u16le", "f32le", "flac"]
 DEFAULT_PROFILE = "PAL_VHS"
+
+# UI labels for the microarchitecture selector. Keep the first entry as the
+# empty "Auto" choice so the QComboBox `currentIndex` 0 stays the safe default.
+MICROARCH_UI_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("Auto (use host default)", MICROARCH_AUTO),
+) + tuple((label, label) for label in MICROARCH_LEVELS)
 
 
 def _split_user_args(extra_args: str, *, strict: bool = True) -> list[str]:
@@ -178,21 +196,48 @@ def _open_linux_terminal(shell_command: str) -> None:
     )
 
 
-def _open_terminal(command_parts: list[str], working_directory: Path) -> None:
+def _open_terminal(
+    command_parts: list[str],
+    working_directory: Path,
+    *,
+    env_exports: Optional[dict[str, str]] = None,
+) -> None:
     if os.name == "nt":
-        creation_flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-        subprocess.Popen(
-            command_parts,
-            cwd=str(working_directory),
-            creationflags=creation_flags,
-        )
+        # On Windows, a fresh console doesn't inherit any env we set here
+        # unless we mutate os.environ before Popen.
+        prior: dict[str, Optional[str]] = {}
+        if env_exports:
+            for key, value in env_exports.items():
+                prior[key] = os.environ.get(key)
+                os.environ[key] = value
+        try:
+            creation_flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+            subprocess.Popen(
+                command_parts,
+                cwd=str(working_directory),
+                creationflags=creation_flags,
+            )
+        finally:
+            if env_exports:
+                for key, original in prior.items():
+                    if original is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = original
         return
+
+    env_prefix = ""
+    if env_exports:
+        exports = " ".join(
+            f"{key}={shlex.quote(value)}" for key, value in env_exports.items()
+        )
+        env_prefix = f"{exports} "
 
     command = _shell_join(command_parts)
     shell = os.environ.get("SHELL", "/bin/bash")
     shell_command = (
         f'echo "[decode-launcher] starting command..."; '
-        f"cd {shlex.quote(str(working_directory))} && {command}; "
+        f"cd {shlex.quote(str(working_directory))} && {env_prefix}{command}; "
         "status=$?; "
         "echo; "
         'echo "[decode-launcher] process finished with exit code $status"; '
@@ -290,6 +335,30 @@ class DecodeLauncherWindow(QWidget):
         self.input_format_combo.addItems(INPUT_FORMATS)
         self.input_format_combo.setCurrentText("flac")
 
+        self.microarch_combo = QComboBox()
+        for ui_label, _value in MICROARCH_UI_OPTIONS:
+            self.microarch_combo.addItem(ui_label)
+        self.microarch_combo.setCurrentIndex(0)
+        self.microarch_build_button = QPushButton("Build level…")
+        self.microarch_build_button.setToolTip(
+            "Compile tape-decode for the selected x86-64 microarchitecture level\n"
+            "and place the binary in the matching target-x86-64-vN/ directory."
+        )
+        self.microarch_locate_button = QPushButton("Locate binary")
+        self.microarch_locate_button.setToolTip(
+            "Show the on-disk path of the tape-decode binary that will be used\n"
+            "for the selected x86-64 microarchitecture level."
+        )
+        non_x86 = native_host_arch() != "x86_64"
+        if non_x86:
+            self.microarch_combo.setEnabled(False)
+            self.microarch_build_button.setEnabled(False)
+            self.microarch_locate_button.setEnabled(False)
+            self.microarch_combo.setToolTip(
+                "x86-64 microarchitecture selection is only relevant on x86_64 hosts.\n"
+                "On this host, compile from source with RUSTFLAGS=\"-C target-cpu=native\"."
+            )
+
         self.threads_spin = QSpinBox()
         self.threads_spin.setRange(0, 64)
         self.threads_spin.setValue(4)
@@ -362,19 +431,30 @@ class DecodeLauncherWindow(QWidget):
         launch_layout.addWidget(QLabel("MT distance size"), 7, 2)
         launch_layout.addWidget(self.mt_distance_size_spin, 7, 3)
 
-        launch_layout.addWidget(self.include_chroma_check, 8, 0, 1, 2)
-        launch_layout.addWidget(self.include_metadata_check, 8, 2, 1, 2)
-        launch_layout.addWidget(self.overwrite_check, 9, 0, 1, 2)
-        launch_layout.addWidget(self.ire0_adjust_check, 9, 2, 1, 2)
-        launch_layout.addWidget(self.debug_check, 10, 0, 1, 2)
+        launch_layout.addWidget(QLabel("x86-64 microarch level"), 8, 0)
+        launch_layout.addWidget(self.microarch_combo, 8, 1, 1, 2)
+        launch_layout.addWidget(self.microarch_locate_button, 8, 3)
 
-        launch_layout.addWidget(QLabel("Extra arguments"), 11, 0)
-        launch_layout.addWidget(self.extra_args_edit, 11, 1, 1, 3)
+        microarch_actions = QHBoxLayout()
+        microarch_actions.addWidget(self.microarch_build_button)
+        microarch_actions.addStretch(1)
+        microarch_actions_widget = QWidget()
+        microarch_actions_widget.setLayout(microarch_actions)
+        launch_layout.addWidget(microarch_actions_widget, 9, 0, 1, 4)
 
-        launch_layout.addWidget(QLabel("Terminal preview"), 12, 0)
-        launch_layout.addWidget(self.command_preview, 12, 1, 1, 3)
+        launch_layout.addWidget(self.include_chroma_check, 10, 0, 1, 2)
+        launch_layout.addWidget(self.include_metadata_check, 10, 2, 1, 2)
+        launch_layout.addWidget(self.overwrite_check, 11, 0, 1, 2)
+        launch_layout.addWidget(self.ire0_adjust_check, 11, 2, 1, 2)
+        launch_layout.addWidget(self.debug_check, 12, 0, 1, 2)
 
-        launch_layout.addWidget(self.note_label, 13, 0, 1, 4)
+        launch_layout.addWidget(QLabel("Extra arguments"), 13, 0)
+        launch_layout.addWidget(self.extra_args_edit, 13, 1, 1, 3)
+
+        launch_layout.addWidget(QLabel("Terminal preview"), 14, 0)
+        launch_layout.addWidget(self.command_preview, 14, 1, 1, 3)
+
+        launch_layout.addWidget(self.note_label, 15, 0, 1, 4)
 
         action_row = QHBoxLayout()
         action_row.addWidget(self.launch_button)
@@ -408,6 +488,9 @@ class DecodeLauncherWindow(QWidget):
         self.input_browse_button.clicked.connect(self._browse_input_file)
         self.output_browse_button.clicked.connect(self._browse_output_path)
         self.profile_file_browse_button.clicked.connect(self._browse_profile_file)
+        self.microarch_combo.currentIndexChanged.connect(self._refresh_tool_state)
+        self.microarch_build_button.clicked.connect(self._build_for_selected_level)
+        self.microarch_locate_button.clicked.connect(self._locate_level_binary)
         self.launch_button.clicked.connect(self._launch_selected_tool)
         self.launch_tbc_tools_button.clicked.connect(self._launch_tbc_tools)
         self.close_button.clicked.connect(self.close)
@@ -569,20 +652,57 @@ class DecodeLauncherWindow(QWidget):
 
         return args
 
+    def _selected_microarch_level(self) -> str:
+        """Return the normalized level for the currently-selected combo entry,
+        or MICROARCH_AUTO for index 0."""
+        index = self.microarch_combo.currentIndex()
+        if 0 <= index < len(MICROARCH_UI_OPTIONS):
+            return normalize_microarch_level(MICROARCH_UI_OPTIONS[index][1])
+        return MICROARCH_AUTO
+
     def _build_command(self, tool: ToolSpec, *, strict: bool) -> list[str]:
+        level = self._selected_microarch_level()
         if tool.subcommand == "decode":
-            return build_tape_decode_command(self._build_decode_args(strict=strict))
+            return build_tape_decode_command(
+                self._build_decode_args(strict=strict), level=level
+            )
 
         extra = self.extra_args_edit.text().strip()
         extra_args = _split_user_args(extra, strict=strict) if extra else []
-        return build_tape_decode_command([tool.subcommand] + extra_args)
+        return build_tape_decode_command(
+            [tool.subcommand] + extra_args, level=level
+        )
 
     def _terminal_preview_command(self, tool: ToolSpec) -> str:
+        level = self._selected_microarch_level()
         try:
             command = self._build_command(tool, strict=False)
-            return _shell_join_platform(command)
+            joined = _shell_join_platform(command)
         except Exception as exc:
-            return f"[preview unavailable] {exc}"
+            preview = f"[preview unavailable] {exc}"
+        else:
+            suffix_parts = []
+            if level:
+                try:
+                    resolved = resolve_tape_decode_prefix(level=level)
+                    if resolved:
+                        suffix_parts.append(f"bin: {resolved[0]}")
+                except FileNotFoundError:
+                    suffix_parts.append(
+                        f"binary for {level} not built "
+                        f"(use 'Build level…' to compile it)"
+                    )
+            if level:
+                suffix_parts.append(
+                    f"RUSTFLAGS=-C target-cpu={microarch_target_cpu(level)}"
+                )
+                target_dir = microarch_target_dir(level)
+                if target_dir:
+                    suffix_parts.append(f"CARGO_TARGET_DIR={target_dir}")
+            preview = joined
+            if suffix_parts:
+                preview = f"{joined}    [{'  '.join(suffix_parts)}]"
+        return preview
 
     def _effective_working_directory(self) -> Path:
         input_path = self.input_edit.text().strip()
@@ -758,6 +878,108 @@ class DecodeLauncherWindow(QWidget):
                 return parent
         return None
 
+    def _build_for_selected_level(self) -> None:
+        level = self._selected_microarch_level()
+        if not level:
+            QMessageBox.information(
+                self,
+                "Build for level",
+                "Pick a specific x86-64 microarchitecture level first "
+                "(Auto means \"use the host default\").",
+            )
+            return
+
+        if native_host_arch() != "x86_64":
+            QMessageBox.warning(
+                self,
+                "Build for level",
+                f"This host is not x86_64 ({native_host_arch()}). "
+                "x86-64 microarchitecture levels only apply to x86_64 builds; "
+                "compile from source with RUSTFLAGS=\"-C target-cpu=native\" instead.",
+            )
+            return
+
+        if not shutil.which("cargo"):
+            QMessageBox.critical(
+                self,
+                "cargo not found",
+                "Could not find `cargo` on PATH. Install Rust (rustup) and try again.",
+            )
+            return
+
+        try:
+            cmd = build_cargo_command(level)
+        except ValueError as exc:
+            QMessageBox.critical(self, "Build for level", str(exc))
+            return
+
+        # Compose the visible command so the user sees the exact flags and
+        # the matching CARGO_TARGET_DIR (mirrors .github/workflows/build.yml).
+        target_cpu = microarch_target_cpu(level)
+        target_dir = microarch_target_dir(level)
+        env_prefix = ""
+        if target_dir:
+            env_prefix = f"CARGO_TARGET_DIR={shlex.quote(target_dir)} "
+        env_prefix += f"RUSTFLAGS={shlex.quote(f'-C target-cpu={target_cpu}')} "
+        joined = env_prefix + _shell_join_platform(cmd)
+
+        working_directory = Path(__file__).resolve().parent
+        # Propagate the level-specific env into a child terminal.
+        env_payload = "\n".join(
+            f"export {key}={shlex.quote(value)}"
+            for key, value in (
+                ("CARGO_TARGET_DIR", target_dir) if target_dir else (),
+                ("RUSTFLAGS", f"-C target-cpu={target_cpu}"),
+            )
+        )
+        shell_command = (
+            f"echo '[decode-launcher] building tape-decode at {level}...'; "
+            f"echo '[decode-launcher] {joined}'; "
+        )
+        if env_payload:
+            shell_command += f"{env_payload}; "
+        shell_command += _shell_join_platform(cmd) + "; "
+        shell_command += (
+            "status=$?; "
+            "echo; "
+            "echo '[decode-launcher] cargo finished with exit code $status'; "
+            f"exec {shlex.quote(os.environ.get('SHELL', '/bin/bash'))} -l"
+        )
+
+        try:
+            _open_terminal(["bash", "-lc", shell_command], working_directory)
+        except Exception as exc:
+            QMessageBox.critical(self, "Build for level", str(exc))
+            return
+
+        # Mirror what the terminal will execute in the in-window preview so the
+        # user immediately sees both the cargo command and the resolved binary
+        # location (before / after build, depending on disk state).
+        self._refresh_tool_state()
+
+    def _locate_level_binary(self) -> None:
+        level = self._selected_microarch_level()
+        try:
+            prefix = resolve_tape_decode_prefix(level=level)
+        except FileNotFoundError as exc:
+            QMessageBox.information(
+                self,
+                "Binary location",
+                f"No tape-decode binary found for level {level or 'Auto'}.\n\n"
+                f"{exc}\n\n"
+                "Click 'Build level…' to compile one for this host, or pick Auto.",
+            )
+            return
+        path = prefix[0] if prefix else ""
+        if not path:
+            QMessageBox.information(self, "Binary location", "No binary resolved.")
+            return
+        QMessageBox.information(
+            self,
+            "Binary location",
+            f"Level: {level or 'Auto'}\nBinary: {path}",
+        )
+
     def _launch_tbc_tools(self) -> None:
         executable = self._find_tbc_tools_executable()
         if executable is None:
@@ -784,6 +1006,19 @@ class DecodeLauncherWindow(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "Launch failed", str(exc))
 
+    def _selected_microarch_env(self) -> Optional[dict[str, str]]:
+        """Return env exports for the selected level, or None on Auto."""
+        level = self._selected_microarch_level()
+        if not level:
+            return None
+        env: dict[str, str] = {
+            "RUSTFLAGS": f"-C target-cpu={microarch_target_cpu(level)}",
+        }
+        target_dir = microarch_target_dir(level)
+        if target_dir:
+            env["CARGO_TARGET_DIR"] = target_dir
+        return env
+
     def _launch_selected_tool(self) -> None:
         tool = self._selected_tool()
         working_directory = self._effective_working_directory()
@@ -802,7 +1037,11 @@ class DecodeLauncherWindow(QWidget):
             return
 
         try:
-            _open_terminal(command, working_directory)
+            _open_terminal(
+                command,
+                working_directory,
+                env_exports=self._selected_microarch_env(),
+            )
         except Exception as exc:
             QMessageBox.critical(self, "Launch failed", str(exc))
 
