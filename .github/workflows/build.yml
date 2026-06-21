@@ -134,29 +134,48 @@ jobs:
         with:
           targets: aarch64-unknown-linux-gnu
 
+      - name: Install aarch64 cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Build tape-decode CLI (Linux x86-64 v1-v4 + aarch64)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: |
           set -euo pipefail
-          LEVELS=(v1 v2 v3 v4 aarch64)
-          declare -A TARGET_MAP=(
-            [v1]=x86_64-unknown-linux-gnu
-            [v2]=x86_64-unknown-linux-gnu
-            [v3]=x86_64-unknown-linux-gnu
-            [v4]=x86_64-unknown-linux-gnu
-            [aarch64]=aarch64-unknown-linux-gnu
-          )
-          declare -A RUSTFLAGS_MAP=(
-            [v1]="-C target-feature=+sse2"
-            [v2]="-C target-feature=+sse3,+ssse3,+sse4.1,+sse4.2"
-            [v3]="-C target-feature=+avx,+avx2"
-            [v4]="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl"
-            [aarch64]=""
-          )
-          for KEY in "${LEVELS[@]}"; do
-            echo "::group::Build ${KEY}"
-            RUSTFLAGS="${RUSTFLAGS_MAP[$KEY]}" \
-              cargo build --release --target "${TARGET_MAP[$KEY]}" --bin tape-decode
+          build_level() {
+            local level="$1"
+            local target=""
+            local rustflags=""
+            case "$level" in
+              v1)
+                target="x86_64-unknown-linux-gnu"
+                rustflags="-C target-feature=+sse2"
+                ;;
+              v2)
+                target="x86_64-unknown-linux-gnu"
+                rustflags="-C target-feature=+sse3,+ssse3,+sse4.1,+sse4.2"
+                ;;
+              v3)
+                target="x86_64-unknown-linux-gnu"
+                rustflags="-C target-feature=+avx,+avx2"
+                ;;
+              v4)
+                target="x86_64-unknown-linux-gnu"
+                rustflags="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl"
+                ;;
+              aarch64)
+                target="aarch64-unknown-linux-gnu"
+                rustflags=""
+                ;;
+            esac
+            echo "::group::Build ${level}"
+            RUSTFLAGS="$rustflags" cargo build --release --target "$target" --bin tape-decode
             echo "::endgroup::"
+          }
+          for level in v1 v2 v3 v4 aarch64; do
+            build_level "$level"
           done
 
       - name: Package Linux binaries
@@ -219,26 +238,38 @@ jobs:
       - name: Build tape-decode CLI (macOS x86-64 v1-v4 + aarch64)
         run: |
           set -euo pipefail
-          LEVELS=(v1 v2 v3 v4 aarch64)
-          declare -A TARGET_MAP=(
-            [v1]=x86_64-apple-darwin
-            [v2]=x86_64-apple-darwin
-            [v3]=x86_64-apple-darwin
-            [v4]=x86_64-apple-darwin
-            [aarch64]=aarch64-apple-darwin
-          )
-          declare -A RUSTFLAGS_MAP=(
-            [v1]="-C target-feature=+sse2"
-            [v2]="-C target-feature=+sse3,+ssse3,+sse4.1,+sse4.2"
-            [v3]="-C target-feature=+avx,+avx2"
-            [v4]="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl"
-            [aarch64]=""
-          )
-          for KEY in "${LEVELS[@]}"; do
-            echo "::group::Build ${KEY}"
-            RUSTFLAGS="${RUSTFLAGS_MAP[$KEY]}" \
-              cargo build --release --target "${TARGET_MAP[$KEY]}" --bin tape-decode
+          build_level() {
+            local level="$1"
+            local target=""
+            local rustflags=""
+            case "$level" in
+              v1)
+                target="x86_64-apple-darwin"
+                rustflags="-C target-feature=+sse2"
+                ;;
+              v2)
+                target="x86_64-apple-darwin"
+                rustflags="-C target-feature=+sse3,+ssse3,+sse4.1,+sse4.2"
+                ;;
+              v3)
+                target="x86_64-apple-darwin"
+                rustflags="-C target-feature=+avx,+avx2"
+                ;;
+              v4)
+                target="x86_64-apple-darwin"
+                rustflags="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl"
+                ;;
+              aarch64)
+                target="aarch64-apple-darwin"
+                rustflags=""
+                ;;
+            esac
+            echo "::group::Build ${level}"
+            RUSTFLAGS="$rustflags" cargo build --release --target "$target" --bin tape-decode
             echo "::endgroup::"
+          }
+          for level in v1 v2 v3 v4 aarch64; do
+            build_level "$level"
           done
 
       - name: Package macOS binaries
