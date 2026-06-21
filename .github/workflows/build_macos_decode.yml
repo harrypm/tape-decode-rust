@@ -90,7 +90,7 @@ jobs:
               v4) rustflags="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl" ;;
             esac
             echo "::group::Build ${level}"
-            CARGO_TARGET_DIR="target-${level}" RUSTFLAGS="$rustflags" \
+            CARGO_TARGET_DIR="target-x86-64-${level}" RUSTFLAGS="$rustflags" \
               cargo build --release --target "${{ matrix.target }}" --bin tape-decode
             echo "::endgroup::"
           }
