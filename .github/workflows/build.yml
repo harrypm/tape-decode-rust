@@ -67,7 +67,8 @@ jobs:
             [v3]="-C target-feature=+avx,+avx2"
             [v4]="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl"
           )
-          for LEVEL in v1 v2 v3 v4; do
+          LEVELS=(v1 v2 v3 v4)
+          for LEVEL in "${LEVELS[@]}"; do
             echo "::group::Build Windows ${LEVEL}"
             RUSTFLAGS="${RUSTFLAGS_MAP[$LEVEL]}" \
               cargo build --release --target "${TARGET_MAP[$LEVEL]}" --bin tape-decode
@@ -86,7 +87,8 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           mkdir -p "release/windows-x86_64"
-          for LEVEL in v1 v2 v3 v4; do
+          LEVELS=(v1 v2 v3 v4)
+          for LEVEL in "${LEVELS[@]}"; do
             mkdir -p "release/windows-x86_64/tape-decode-${LEVEL}"
             cp "target/x86_64-pc-windows-msvc/release/tape-decode.exe" \
                "release/windows-x86_64/tape-decode-${LEVEL}/tape-decode.exe"
@@ -129,13 +131,13 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Add Windows GNU target
-        run: rustup target add x86_64-pc-windows-gnu || true
+        with:
+          targets: aarch64-unknown-linux-gnu
 
       - name: Build tape-decode CLI (Linux x86-64 v1-v4 + aarch64)
         run: |
           set -euo pipefail
+          LEVELS=(v1 v2 v3 v4 aarch64)
           declare -A TARGET_MAP=(
             [v1]=x86_64-unknown-linux-gnu
             [v2]=x86_64-unknown-linux-gnu
@@ -150,7 +152,7 @@ jobs:
             [v4]="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl"
             [aarch64]=""
           )
-          for KEY in v1 v2 v3 v4 aarch64; do
+          for KEY in "${LEVELS[@]}"; do
             echo "::group::Build ${KEY}"
             RUSTFLAGS="${RUSTFLAGS_MAP[$KEY]}" \
               cargo build --release --target "${TARGET_MAP[$KEY]}" --bin tape-decode
@@ -161,7 +163,8 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
-          for LEVEL in v1 v2 v3 v4; do
+          LEVELS=(v1 v2 v3 v4)
+          for LEVEL in "${LEVELS[@]}"; do
             mkdir -p "release/linux-x86_64/tape-decode-${LEVEL}"
             cp "target/x86_64-unknown-linux-gnu/release/tape-decode" \
                "release/linux-x86_64/tape-decode-${LEVEL}/tape-decode"
@@ -210,10 +213,13 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
 
       - name: Build tape-decode CLI (macOS x86-64 v1-v4 + aarch64)
         run: |
           set -euo pipefail
+          LEVELS=(v1 v2 v3 v4 aarch64)
           declare -A TARGET_MAP=(
             [v1]=x86_64-apple-darwin
             [v2]=x86_64-apple-darwin
@@ -228,7 +234,7 @@ jobs:
             [v4]="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl"
             [aarch64]=""
           )
-          for KEY in v1 v2 v3 v4 aarch64; do
+          for KEY in "${LEVELS[@]}"; do
             echo "::group::Build ${KEY}"
             RUSTFLAGS="${RUSTFLAGS_MAP[$KEY]}" \
               cargo build --release --target "${TARGET_MAP[$KEY]}" --bin tape-decode
@@ -239,7 +245,8 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
-          for LEVEL in v1 v2 v3 v4; do
+          LEVELS=(v1 v2 v3 v4)
+          for LEVEL in "${LEVELS[@]}"; do
             mkdir -p "release/macos-x86_64/tape-decode-${LEVEL}"
             cp "target/x86_64-apple-darwin/release/tape-decode" \
                "release/macos-x86_64/tape-decode-${LEVEL}/tape-decode"
