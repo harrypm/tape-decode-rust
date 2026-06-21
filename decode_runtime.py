@@ -123,16 +123,24 @@ def _candidate_binary_paths(level: str = MICROARCH_AUTO) -> list[Path]:
         ]
     )
 
-    # When a microarch level is requested, look in the matching per-level
-    # `target-<level>/` subdirectory first -- this is the layout produced by
-    # the project's CI workflow (CARGO_TARGET_DIR=target-x86-64-vN).
     try:
         triple = _native_triple()
     except RuntimeError:
         triple = None
+    # When a microarch level is requested, look in the matching per-level
+    # `target-<level>/` subdirectory first -- this is the layout produced by
+    # the project's CI workflow (CARGO_TARGET_DIR=target-x86-64-vN).
 
     if level and triple:
         candidates.append(repo_root / f"target-{level}" / triple / "release" / binary)
+    # Auto should still use the bundled/local optimized binaries when present.
+    # Search highest to lowest so a released launcher with v1-v4 payloads uses
+    # the best available x86-64 build unless the user picks a specific level.
+    if not level and triple:
+        for auto_level in reversed(MICROARCH_LEVELS):
+            candidates.append(
+                repo_root / f"target-{auto_level}" / triple / "release" / binary
+            )
 
     candidates.extend(
         [

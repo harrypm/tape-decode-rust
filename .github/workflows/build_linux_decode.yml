@@ -76,8 +76,31 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Build tape-decode binary
+      - name: Build tape-decode binary (single)
+        if: matrix.arch != 'x86_64'
         run: cargo build --release --target "${{ matrix.target }}" --bin tape-decode
+
+      - name: Build tape-decode binaries (x86-64 v1-v4)
+        if: matrix.arch == 'x86_64'
+        run: |
+          set -euo pipefail
+          build_level() {
+            local level="$1"
+            local rustflags=""
+            case "$level" in
+              v1) rustflags="-C target-feature=+sse2" ;;
+              v2) rustflags="-C target-feature=+sse3,+ssse3,+sse4.1,+sse4.2" ;;
+              v3) rustflags="-C target-feature=+avx,+avx2" ;;
+              v4) rustflags="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl" ;;
+            esac
+            echo "::group::Build ${level}"
+            CARGO_TARGET_DIR="target-${level}" RUSTFLAGS="$rustflags" \
+              cargo build --release --target "${{ matrix.target }}" --bin tape-decode
+            echo "::endgroup::"
+          }
+          for level in v1 v2 v3 v4; do
+            build_level "$level"
+          done
 
       - name: Install launcher packaging dependencies
         run: |
@@ -85,8 +108,14 @@ jobs:
           pip install pyinstaller -r requirements-launcher.txt
 
       - name: Build launcher binary
+        if: matrix.arch != 'x86_64'
         env:
           TAPE_DECODE_BIN: target/${{ matrix.target }}/release/tape-decode
+        run: python3 scripts/ci/build-linux-decode-bin.py
+
+      - name: Build launcher binary (with microarch levels)
+        if: matrix.arch == 'x86_64'
+        # TAPE_DECODE_BIN omitted; packaging script discovers target-x86-64-vN/...
         run: python3 scripts/ci/build-linux-decode-bin.py
 
       - name: Build AppDir and AppImage

@@ -55,31 +55,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          declare -A TARGET_MAP=(
-            [v1]=x86_64-pc-windows-msvc
-            [v2]=x86_64-pc-windows-msvc
-            [v3]=x86_64-pc-windows-msvc
-            [v4]=x86_64-pc-windows-msvc
-          )
-          declare -A RUSTFLAGS_MAP=(
-            [v1]="-C target-feature=+sse2"
-            [v2]="-C target-feature=+sse3,+ssse3,+sse4.1,+sse4.2"
-            [v3]="-C target-feature=+avx,+avx2"
-            [v4]="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl"
-          )
-          LEVELS=(v1 v2 v3 v4)
-          for LEVEL in "${LEVELS[@]}"; do
-            echo "::group::Build Windows ${LEVEL}"
-            RUSTFLAGS="${RUSTFLAGS_MAP[$LEVEL]}" \
-              cargo build --release --target "${TARGET_MAP[$LEVEL]}" --bin tape-decode
+          build_level() {
+            local level="$1"
+            local rustflags=""
+            case "$level" in
+              v1) rustflags="-C target-feature=+sse2" ;;
+              v2) rustflags="-C target-feature=+sse3,+ssse3,+sse4.1,+sse4.2" ;;
+              v3) rustflags="-C target-feature=+avx,+avx2" ;;
+              v4) rustflags="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl" ;;
+            esac
+            echo "::group::Build Windows ${level}"
+            CARGO_TARGET_DIR="target-${level}" RUSTFLAGS="$rustflags" \
+              cargo build --release --target x86_64-pc-windows-msvc --bin tape-decode
             echo "::endgroup::"
+          }
+          for level in v1 v2 v3 v4; do
+            build_level "$level"
           done
 
       - name: List built Windows binaries
         shell: bash
         run: |
           set -euo pipefail
-          ls -la target/x86_64-pc-windows-msvc/release/tape-decode.exe
+          ls -la target-x86-64-v*/x86_64-pc-windows-msvc/release/tape-decode.exe 2>/dev/null || true
+          ls -la target/x86_64-pc-windows-msvc/release/tape-decode.exe 2>/dev/null || true
 
       - name: Package Windows binaries
         shell: bash
@@ -87,11 +86,11 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           mkdir -p "release/windows-x86_64"
-          LEVELS=(v1 v2 v3 v4)
-          for LEVEL in "${LEVELS[@]}"; do
-            mkdir -p "release/windows-x86_64/tape-decode-${LEVEL}"
-            cp "target/x86_64-pc-windows-msvc/release/tape-decode.exe" \
-               "release/windows-x86_64/tape-decode-${LEVEL}/tape-decode.exe"
+          for level in v1 v2 v3 v4; do
+            src="target-${level}/x86_64-pc-windows-msvc/release/tape-decode.exe"
+            if [ ! -f "$src" ]; then src="target/x86_64-pc-windows-msvc/release/tape-decode.exe"; fi
+            mkdir -p "release/windows-x86_64/tape-decode-${level}"
+            cp "$src" "release/windows-x86_64/tape-decode-${level}/tape-decode.exe"
           done
           7z a "release/tape-decode-windows-x86_64-v${VERSION}.zip" "release/windows-x86_64"
           echo "WINDOWS_RELEASE_ASSET=release/tape-decode-windows-x86_64-v${VERSION}.zip" >> "$GITHUB_OUTPUT"
@@ -171,7 +170,8 @@ jobs:
                 ;;
             esac
             echo "::group::Build ${level}"
-            RUSTFLAGS="$rustflags" cargo build --release --target "$target" --bin tape-decode
+            CARGO_TARGET_DIR="target-${level}" RUSTFLAGS="$rustflags" \
+              cargo build --release --target "$target" --bin tape-decode
             echo "::endgroup::"
           }
           for level in v1 v2 v3 v4 aarch64; do
@@ -182,11 +182,11 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
-          LEVELS=(v1 v2 v3 v4)
-          for LEVEL in "${LEVELS[@]}"; do
-            mkdir -p "release/linux-x86_64/tape-decode-${LEVEL}"
-            cp "target/x86_64-unknown-linux-gnu/release/tape-decode" \
-               "release/linux-x86_64/tape-decode-${LEVEL}/tape-decode"
+          for level in v1 v2 v3 v4; do
+            src="target-${level}/x86_64-unknown-linux-gnu/release/tape-decode"
+            if [ ! -f "$src" ]; then src="target/x86_64-unknown-linux-gnu/release/tape-decode"; fi
+            mkdir -p "release/linux-x86_64/tape-decode-${level}"
+            cp "$src" "release/linux-x86_64/tape-decode-${level}/tape-decode"
           done
           mkdir -p "release/linux-aarch64"
           cp "target/aarch64-unknown-linux-gnu/release/tape-decode" \
@@ -276,11 +276,11 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
-          LEVELS=(v1 v2 v3 v4)
-          for LEVEL in "${LEVELS[@]}"; do
-            mkdir -p "release/macos-x86_64/tape-decode-${LEVEL}"
-            cp "target/x86_64-apple-darwin/release/tape-decode" \
-               "release/macos-x86_64/tape-decode-${LEVEL}/tape-decode"
+          for level in v1 v2 v3 v4; do
+            src="target-${level}/x86_64-apple-darwin/release/tape-decode"
+            if [ ! -f "$src" ]; then src="target/x86_64-apple-darwin/release/tape-decode"; fi
+            mkdir -p "release/macos-x86_64/tape-decode-${level}"
+            cp "$src" "release/macos-x86_64/tape-decode-${level}/tape-decode"
           done
           mkdir -p "release/macos-aarch64"
           cp "target/aarch64-apple-darwin/release/tape-decode" \
