@@ -30,8 +30,10 @@ def _resolve_tape_decode_bin() -> Path:
             return p.resolve()
     bin_name = _binary_name()
     repo_root = Path.cwd()
-    # Prefer a level build (highest first) as the default root binary when present
-    for lvl in reversed(_LEVELS):
+    # Prefer a level build (lowest first = v1) as the default root binary.
+    # This ensures the bare "." binary inside the bundle is always runnable
+    # on any x86-64 host (CI verification and end-users on older CPUs).
+    for lvl in _LEVELS:
         for tri in _TRIPLES:
             p = repo_root / f"target-{lvl}" / tri / "release" / bin_name
             if p.is_file():

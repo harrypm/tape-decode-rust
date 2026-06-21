@@ -27,6 +27,43 @@ MICROARCH_LEVEL_TO_TARGET_CPU: dict[str, str] = {
 }
 
 
+def _env_forced_level() -> str:
+    """Check for an environment-forced microarch level (used by CI verification
+    and power users). Checked before falling back to Auto behavior.
+    """
+    for k in ("TAPE_DECODE_MICROARCH", "MICROARCH_LEVEL", "TAPE_DECODE_LEVEL"):
+        v = os.environ.get(k, "").strip()
+        if v:
+            return normalize_microarch_level(v)
+    return MICROARCH_AUTO
+
+
+def _binary_seems_runnable(p: Path, timeout_seconds: float = 4.0) -> bool:
+    """Probe whether a candidate tape-decode binary can actually execute
+    'list-profiles' on the current host without an illegal-instruction crash.
+
+    Used only for Auto selection so we skip level-optimized binaries whose
+    required CPU features are not available locally.
+    """
+    try:
+        completed = subprocess.run(
+            [str(p), "list-profiles"],
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        if completed.returncode not in (0, 1, 2):
+            return False
+        combined = (completed.stdout or "") + (completed.stderr or "")
+        low = combined.lower()
+        if any(x in low for x in ("illegal instruction", "sigill", "trace/breakpoint")):
+            return False
+        return True
+    except Exception:
+        return False
+
+
 def _binary_name() -> str:
     return "tape-decode.exe" if os.name == "nt" else "tape-decode"
 
@@ -111,8 +148,41 @@ def _candidate_binary_paths(level: str = MICROARCH_AUTO) -> list[Path]:
     candidates: list[Path] = []
 
     meipass = getattr(sys, "_MEIPASS", "")
-    if meipass:
-        candidates.append(Path(meipass) / binary)
+    meipass_path = Path(meipass) if meipass else None
+
+    try:
+        triple = _native_triple()
+    except RuntimeError:
+        triple = None
+
+    # Structured per-level paths (target-x86-64-vN/<triple>/release) are preferred
+    # so that an explicit level or Auto can select the matching optimized binary
+    # even when a bare default binary is also present in the bundle root.
+    # For Auto we insert highest-to-lowest so the best runnable one wins.
+    if triple:
+        if level:
+            if meipass_path:
+                candidates.append(
+                    meipass_path / f"target-{level}" / triple / "release" / binary
+                )
+            candidates.append(
+                repo_root / f"target-{level}" / triple / "release" / binary
+            )
+        else:
+            for auto_level in reversed(MICROARCH_LEVELS):
+                if meipass_path:
+                    candidates.append(
+                        meipass_path / f"target-{auto_level}" / triple / "release" / binary
+                    )
+                candidates.append(
+                    repo_root / f"target-{auto_level}" / triple / "release" / binary
+                )
+
+    # Bare default (the binary we place at "." inside the PyInstaller bundle).
+    # This is intentionally a safe baseline (v1). It is only used if no structured
+    # level binary was found or selected.
+    if meipass_path:
+        candidates.append(meipass_path / binary)
 
     exe_dir = Path(sys.executable).resolve(strict=False).parent
     candidates.extend(
@@ -123,25 +193,7 @@ def _candidate_binary_paths(level: str = MICROARCH_AUTO) -> list[Path]:
         ]
     )
 
-    try:
-        triple = _native_triple()
-    except RuntimeError:
-        triple = None
-    # When a microarch level is requested, look in the matching per-level
-    # `target-<level>/` subdirectory first -- this is the layout produced by
-    # the project's CI workflow (CARGO_TARGET_DIR=target-x86-64-vN).
-
-    if level and triple:
-        candidates.append(repo_root / f"target-{level}" / triple / "release" / binary)
-    # Auto should still use the bundled/local optimized binaries when present.
-    # Search highest to lowest so a released launcher with v1-v4 payloads uses
-    # the best available x86-64 build unless the user picks a specific level.
-    if not level and triple:
-        for auto_level in reversed(MICROARCH_LEVELS):
-            candidates.append(
-                repo_root / f"target-{auto_level}" / triple / "release" / binary
-            )
-
+    # Legacy single-target and generic layouts last.
     candidates.extend(
         [
             repo_root / "target" / "release" / binary,
@@ -158,9 +210,19 @@ def _candidate_binary_paths(level: str = MICROARCH_AUTO) -> list[Path]:
 
 def resolve_tape_decode_prefix(level: str = MICROARCH_AUTO) -> list[str]:
     level = normalize_microarch_level(level)
+    if level == MICROARCH_AUTO:
+        forced = _env_forced_level()
+        if forced != MICROARCH_AUTO:
+            level = forced
     for candidate in _candidate_binary_paths(level):
         if candidate.is_file():
-            return [str(candidate)]
+            # For explicit level we trust the on-disk match (user asked for it).
+            # For Auto we only accept binaries that actually execute on this host
+            # (skip higher levels whose CPU features are unavailable).
+            if level != MICROARCH_AUTO or _binary_seems_runnable(candidate):
+                return [str(candidate)]
+            # continue to lower level for Auto
+            continue
 
     on_path = shutil.which(_binary_name()) or shutil.which("tape-decode")
     if on_path:

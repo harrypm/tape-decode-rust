@@ -130,7 +130,7 @@ jobs:
           ln -s /Applications build/dmg/Applications
           hdiutil create -volname "decode-light" -srcfolder build/dmg -ov -format UDZO "$DMG_NAME"
           test -f "$DMG_NAME"
-          dist/decode-light.app/Contents/MacOS/decode-light list-profiles > /tmp/decode-light_profiles.txt
+          TAPE_DECODE_MICROARCH=x86-64-v1 dist/decode-light.app/Contents/MacOS/decode-light list-profiles > /tmp/decode-light_profiles.txt
           grep -q "PAL_VHS" /tmp/decode-light_profiles.txt
 
       - name: Upload macOS DMG
