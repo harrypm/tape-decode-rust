@@ -318,7 +318,37 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: "tape-decode v${{ steps.version.outputs.version }}"
+          draft: true
+          body: |
+            ## x86-64 Version Profiles (Microarchitecture Levels)
+
+            This release adds selectable x86-64 microarchitecture level builds (v1/v2/v3/v4) plus aarch64.
+
+            ### Launcher
+            - Dropdown in Decode Launcher GUI to choose target level: Auto / v1 / v2 / v3 / v4.
+            - Auto detects and uses the native-optimized binary when available.
+            - "Build level..." and "Locate binary" helpers for the selected level.
+            - Level choice propagates to command preview, environment variables, and launch.
+
+            ### Prebuilt Binaries
+            - Separate optimized `tape-decode` binaries per level using targeted RUSTFLAGS:
+              - v1: `-C target-feature=+sse2`
+              - v2: `-C target-feature=+sse3,+ssse3,+sse4.1,+sse4.2`
+              - v3: `-C target-feature=+avx,+avx2`
+              - v4: `-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl`
+            - Platforms: Windows (x86-64 v1-v4), Linux (x86-64 v1-v4 + aarch64), macOS (x86-64 v1-v4 + aarch64).
+
+            ### CI / Build Changes
+            - Cross targets explicitly installed via `dtolnay/rust-toolchain` (Linux aarch64; macOS x86_64 + aarch64).
+            - Linux aarch64: install `gcc-aarch64-linux-gnu` and set `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER`.
+            - Portable case-based `build_level()` helpers replace associative arrays to avoid "unbound variable" errors under `set -euo pipefail`.
+            - All packaging loops hardened with quoted arrays.
+
+            Artifacts are laid out under per-level directories inside the platform zips/tarballs.
+
+            ## Auto-generated notes
           generate_release_notes: true
+          append_body: true
           files: |
             artifacts/tape-decode-windows-x86_64/*.zip
             artifacts/tape-decode-linux/tape-decode-linux-*.tar.gz
