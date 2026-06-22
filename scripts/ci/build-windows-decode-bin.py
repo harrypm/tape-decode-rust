@@ -96,7 +96,6 @@ def main() -> None:
         "--icon",
         "resources\\icon\\tape-decode-rust.ico",
         "--onefile",
-        "--windowed",
         "--name",
         "decode-light",
     ]

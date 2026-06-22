@@ -96,7 +96,6 @@ def main() -> None:
         "--icon",
         "resources/icon/tape-decode-rust-256.png",
         "--onefile",
-        "--windowed",
         "--name",
         "decode-light",
     ]

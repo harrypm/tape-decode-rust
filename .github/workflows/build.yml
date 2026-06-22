@@ -96,7 +96,7 @@ jobs:
         shell: bash
         run: python scripts/ci/build-windows-decode-bin.py
 
-      - name: Package decode-light Windows artifacts
+      - name: Package decode-light Windows artifact
         shell: bash
         run: |
           set -euo pipefail
@@ -107,17 +107,14 @@ jobs:
             ls -la dist/ || true
             exit 1
           fi
-          cp "$EXE" "windows_decode-light_${VERSION}_x86_64.exe"
-          7z a "windows_decode-light_${VERSION}_x86_64.zip" "windows_decode-light_${VERSION}_x86_64.exe"
-          echo "DECODE_LIGHT_WINDOWS=windows_decode-light_${VERSION}_x86_64.zip" >> "$GITHUB_OUTPUT"
+          cp "$EXE" "decode-light-windows_${VERSION}_x86_64.exe"
 
       - name: Upload decode-light Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: decode-light-windows-x86_64
           path: |
-            windows_decode-light_*_x86_64.zip
-            windows_decode-light_*_x86_64.exe
+            decode-light-windows_*_x86_64.exe
           if-no-files-found: warn
 
       - name: Package Windows CLI (raw, secondary)
@@ -377,7 +374,7 @@ jobs:
           ln -sf usr/share/applications/decode-light.desktop AppDir/decode-light.desktop
 
           APPIMAGE_TOOL="${{ matrix.appimagetool }}"
-          APPIMAGE_NAME="linux_decode-light_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.AppImage"
+          APPIMAGE_NAME="decode-light-linux_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.AppImage"
 
           wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/${APPIMAGE_TOOL}"
           chmod +x "${APPIMAGE_TOOL}"
@@ -393,7 +390,7 @@ jobs:
           fi
           grep -q "PAL_VHS" /tmp/decode-light_profiles.txt || true
 
-          ZIP_NAME="linux_decode-light_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.zip"
+          ZIP_NAME="decode-light-linux_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.zip"
           zip -j "${ZIP_NAME}" "${APPIMAGE_NAME}"
           test -f "${ZIP_NAME}"
           test "$(unzip -Z1 "${ZIP_NAME}" | wc -l)" -eq 1
@@ -403,8 +400,8 @@ jobs:
         with:
           name: decode-light-linux-${{ matrix.artifact_suffix }}
           path: |
-            linux_decode-light_*_${{ matrix.artifact_suffix }}.zip
-            linux_decode-light_*_${{ matrix.artifact_suffix }}.AppImage
+            decode-light-linux_*_${{ matrix.artifact_suffix }}.zip
+            decode-light-linux_*_${{ matrix.artifact_suffix }}.AppImage
           if-no-files-found: warn
 
   macos-cli:
@@ -527,13 +524,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          DMG_NAME="macos_decode-light_${BUILD_VERSION}_arm64.dmg"
+          DMG_NAME="decode-light-macos_${BUILD_VERSION}_arm64.dmg"
+          ZIP_NAME="decode-light-macos_${BUILD_VERSION}_arm64.zip"
           rm -rf build/dmg-arm
           mkdir -p build/dmg-arm
           cp -R dist/decode-light.app build/dmg-arm/
           ln -s /Applications build/dmg-arm/Applications
           hdiutil create -volname "decode-light" -srcfolder build/dmg-arm -ov -format UDZO "$DMG_NAME"
           test -f "$DMG_NAME"
+
+          # zip the DMG (consistent with Linux AppImage packaging)
+          zip -j "$ZIP_NAME" "$DMG_NAME"
+          test -f "$ZIP_NAME"
+          test "$(unzip -Z1 "$ZIP_NAME" | wc -l)" -eq 1
+
           # smoke on arm64 bundle (do not force x86-64 microarch)
           dist/decode-light.app/Contents/MacOS/decode-light list-profiles > /tmp/decode-light_arm_profiles.txt || true
           grep -q "PAL_VHS" /tmp/decode-light_arm_profiles.txt || true
@@ -548,13 +552,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          DMG_NAME="macos_decode-light_${BUILD_VERSION}_x86_64.dmg"
+          DMG_NAME="decode-light-macos_${BUILD_VERSION}_x86_64.dmg"
+          ZIP_NAME="decode-light-macos_${BUILD_VERSION}_x86_64.zip"
           rm -rf build/dmg-x86
           mkdir -p build/dmg-x86
           cp -R dist/decode-light.app build/dmg-x86/
           ln -s /Applications build/dmg-x86/Applications
           hdiutil create -volname "decode-light" -srcfolder build/dmg-x86 -ov -format UDZO "$DMG_NAME"
           test -f "$DMG_NAME"
+
+          # zip the DMG (consistent with Linux AppImage packaging)
+          zip -j "$ZIP_NAME" "$DMG_NAME"
+          test -f "$ZIP_NAME"
+          test "$(unzip -Z1 "$ZIP_NAME" | wc -l)" -eq 1
 
           # smoke x86-64 levels bundle
           dist/decode-light.app/Contents/MacOS/decode-light list-profiles > /tmp/decode-light_x86_profiles.txt || true
@@ -565,8 +575,10 @@ jobs:
         with:
           name: decode-light-macos
           path: |
-            macos_decode-light_*_x86_64.dmg
-            macos_decode-light_*_arm64.dmg
+            decode-light-macos_*_x86_64.dmg
+            decode-light-macos_*_arm64.dmg
+            decode-light-macos_*_x86_64.zip
+            decode-light-macos_*_arm64.zip
           if-no-files-found: warn
 
   release:
@@ -610,8 +622,9 @@ jobs:
             ### Included
             - decode-light (GUI launcher) for:
               - Windows (x86-64)
-              - Linux (x86-64 AppImage)
+              - Linux (x86-64 + arm64 AppImage)
               - macOS (x86-64 + arm64)
+            - 9 GUI artifacts total: 1 Windows exe, 4 Linux (AppImage+zip × 2), 4 macOS (DMG+zip × 2).
             - Bundles the tape-decode CLI (v1 default + v2/v3/v4 level-optimized binaries where applicable).
             - Profiles list and list-profiles verification included in launcher bundles.
 
@@ -629,10 +642,10 @@ jobs:
           generate_release_notes: true
           append_body: true
           files: |
-            artifacts/decode-light-windows-x86_64/*.zip
             artifacts/decode-light-windows-x86_64/*.exe
             artifacts/decode-light-linux-x86_64/*.zip
             artifacts/decode-light-linux-x86_64/*.AppImage
             artifacts/decode-light-linux-arm64/*.zip
             artifacts/decode-light-linux-arm64/*.AppImage
             artifacts/decode-light-macos/*.dmg
+            artifacts/decode-light-macos/*.zip
