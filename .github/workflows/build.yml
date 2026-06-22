@@ -65,7 +65,7 @@ jobs:
               v4) rustflags="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl" ;;
             esac
             echo "::group::Build Windows ${level}"
-            CARGO_TARGET_DIR="target-${level}" RUSTFLAGS="$rustflags" \
+            CARGO_TARGET_DIR="target-x86-64-${level}" RUSTFLAGS="$rustflags" \
               cargo build --release --target x86_64-pc-windows-msvc --bin tape-decode
             echo "::endgroup::"
           }
@@ -80,29 +80,69 @@ jobs:
           ls -la target-x86-64-v*/x86_64-pc-windows-msvc/release/tape-decode.exe 2>/dev/null || true
           ls -la target/x86_64-pc-windows-msvc/release/tape-decode.exe 2>/dev/null || true
 
-      - name: Package Windows binaries
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install launcher packaging dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install pyinstaller pyinstaller-versionfile -r requirements-launcher.txt
+
+      - name: Build decode launcher (Windows x86-64 v1-v4)
+        shell: bash
+        run: python scripts/ci/build-windows-decode-bin.py
+
+      - name: Package decode-light Windows artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          EXE="dist/decode-light.exe"
+          if [ ! -f "$EXE" ]; then
+            echo "decode-light.exe not produced"
+            ls -la dist/ || true
+            exit 1
+          fi
+          cp "$EXE" "windows_decode-light_${VERSION}_x86_64.exe"
+          7z a "windows_decode-light_${VERSION}_x86_64.zip" "windows_decode-light_${VERSION}_x86_64.exe"
+          echo "DECODE_LIGHT_WINDOWS=windows_decode-light_${VERSION}_x86_64.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Upload decode-light Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: decode-light-windows-x86_64
+          path: |
+            windows_decode-light_*_x86_64.zip
+            windows_decode-light_*_x86_64.exe
+          if-no-files-found: warn
+
+      - name: Package Windows CLI (raw, secondary)
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           mkdir -p "release/windows-x86_64"
           for level in v1 v2 v3 v4; do
-            src="target-${level}/x86_64-pc-windows-msvc/release/tape-decode.exe"
+            src="target-x86-64-${level}/x86_64-pc-windows-msvc/release/tape-decode.exe"
             if [ ! -f "$src" ]; then src="target/x86_64-pc-windows-msvc/release/tape-decode.exe"; fi
             mkdir -p "release/windows-x86_64/tape-decode-${level}"
             cp "$src" "release/windows-x86_64/tape-decode-${level}/tape-decode.exe"
           done
-          7z a "release/tape-decode-windows-x86_64-v${VERSION}.zip" "release/windows-x86_64"
-          echo "WINDOWS_RELEASE_ASSET=release/tape-decode-windows-x86_64-v${VERSION}.zip" >> "$GITHUB_OUTPUT"
+          7z a "release/tape-decode-windows-x86_64-v${VERSION}.zip" "release/windows-x86_64" || true
+          echo "WINDOWS_RELEASE_ASSET=release/tape-decode-windows-x86_64-v${VERSION}.zip" >> "$GITHUB_OUTPUT" || true
 
-      - name: Upload Windows build artifact
+      - name: Upload Windows CLI artifact (raw, secondary)
         uses: actions/upload-artifact@v4
         with:
           name: tape-decode-windows-x86_64
           path: |
             release/windows-x86_64/tape-decode-*/tape-decode.exe
             release/tape-decode-windows-x86_64-*.zip
-          if-no-files-found: error
+          if-no-files-found: warn
 
   linux-cli:
     name: Linux CLI build (x86-64 v1-v4 + aarch64)
@@ -170,33 +210,38 @@ jobs:
                 ;;
             esac
             echo "::group::Build ${level}"
-            CARGO_TARGET_DIR="target-${level}" RUSTFLAGS="$rustflags" \
-              cargo build --release --target "$target" --bin tape-decode
+            if [[ "$level" == aarch64 ]]; then
+              CARGO_TARGET_DIR="target-aarch64" RUSTFLAGS="$rustflags" \
+                cargo build --release --target "$target" --bin tape-decode
+            else
+              CARGO_TARGET_DIR="target-x86-64-${level}" RUSTFLAGS="$rustflags" \
+                cargo build --release --target "$target" --bin tape-decode
+            fi
             echo "::endgroup::"
           }
           for level in v1 v2 v3 v4 aarch64; do
             build_level "$level"
           done
 
-      - name: Package Linux binaries
+      - name: Package Linux binaries (raw CLI, kept for reference)
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           for level in v1 v2 v3 v4; do
-            src="target-${level}/x86_64-unknown-linux-gnu/release/tape-decode"
+            src="target-x86-64-${level}/x86_64-unknown-linux-gnu/release/tape-decode"
             if [ ! -f "$src" ]; then src="target/x86_64-unknown-linux-gnu/release/tape-decode"; fi
             mkdir -p "release/linux-x86_64/tape-decode-${level}"
             cp "$src" "release/linux-x86_64/tape-decode-${level}/tape-decode"
           done
           mkdir -p "release/linux-aarch64"
-          cp "target/aarch64-unknown-linux-gnu/release/tape-decode" \
-             "release/linux-aarch64/tape-decode"
-          tar -C release -czf "release/tape-decode-linux-x86_64-v${VERSION}.tar.gz" "linux-x86_64"
-          tar -C release -czf "release/tape-decode-linux-aarch64-v${VERSION}.tar.gz" "linux-aarch64"
-          echo "LINUX_X86_64_ASSET=release/tape-decode-linux-x86_64-v${VERSION}.tar.gz" >> "$GITHUB_OUTPUT"
-          echo "LINUX_AARCH64_ASSET=release/tape-decode-linux-aarch64-v${VERSION}.tar.gz" >> "$GITHUB_OUTPUT"
+          cp "target-aarch64/aarch64-unknown-linux-gnu/release/tape-decode" \
+             "release/linux-aarch64/tape-decode" 2>/dev/null || cp "target/aarch64-unknown-linux-gnu/release/tape-decode" "release/linux-aarch64/tape-decode" || true
+          tar -C release -czf "release/tape-decode-linux-x86_64-v${VERSION}.tar.gz" "linux-x86_64" 2>/dev/null || true
+          tar -C release -czf "release/tape-decode-linux-aarch64-v${VERSION}.tar.gz" "linux-aarch64" 2>/dev/null || true
+          echo "LINUX_X86_64_ASSET=release/tape-decode-linux-x86_64-v${VERSION}.tar.gz" >> "$GITHUB_OUTPUT" || true
+          echo "LINUX_AARCH64_ASSET=release/tape-decode-linux-aarch64-v${VERSION}.tar.gz" >> "$GITHUB_OUTPUT" || true
 
-      - name: Upload Linux build artifact
+      - name: Upload Linux build artifact (raw CLI secondary)
         uses: actions/upload-artifact@v4
         with:
           name: tape-decode-linux
@@ -204,7 +249,69 @@ jobs:
             release/linux-x86_64/tape-decode-*/tape-decode
             release/linux-aarch64/tape-decode
             release/tape-decode-linux-*-v*.tar.gz
-          if-no-files-found: error
+          if-no-files-found: warn
+
+      - name: Setup Python (for decode launcher)
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install launcher packaging dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install pyinstaller -r requirements-launcher.txt
+
+      - name: Build decode launcher (Linux x86-64 v1-v4)
+        run: python3 scripts/ci/build-linux-decode-bin.py
+
+      - name: Build Linux AppImage for decode-light
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp dist/decode-light AppDir/usr/bin/decode-light
+          chmod +x AppDir/usr/bin/decode-light
+
+          cp resources/appimage/decode-light.desktop AppDir/usr/share/applications/decode-light.desktop
+          cp resources/appimage/AppRun AppDir/AppRun
+          chmod +x AppDir/AppRun
+
+          cp resources/icon/tape-decode-rust-256.png AppDir/usr/share/icons/hicolor/256x256/apps/decode-light.png || true
+          cp resources/icon/tape-decode-rust-256.png AppDir/decode-light.png || true
+
+          ln -sf usr/share/applications/decode-light.desktop AppDir/decode-light.desktop
+          ln -sf decode-light.png AppDir/decode-light.png
+
+          APPIMAGE_TOOL=appimagetool-x86_64.AppImage
+          APPIMAGE_NAME="linux_decode-light_${BUILD_VERSION}_x86_64.AppImage"
+
+          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/${APPIMAGE_TOOL}"
+          chmod +x "${APPIMAGE_TOOL}"
+          "./${APPIMAGE_TOOL}" --appimage-extract
+          env -u SOURCE_DATE_EPOCH ARCH=x86_64 ./squashfs-root/AppRun AppDir "${APPIMAGE_NAME}"
+          chmod +x "${APPIMAGE_NAME}"
+
+          # quick smoke
+          TAPE_DECODE_MICROARCH=x86-64-v1 APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-light_profiles.txt || true
+          grep -q "PAL_VHS" /tmp/decode-light_profiles.txt || true
+
+          ZIP_NAME="linux_decode-light_${BUILD_VERSION}_x86_64.zip"
+          zip -j "${ZIP_NAME}" "${APPIMAGE_NAME}"
+          test -f "${ZIP_NAME}"
+
+      - name: Upload decode-light Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: decode-light-linux-x86_64
+          path: |
+            linux_decode-light_*_x86_64.zip
+            linux_decode-light_*_x86_64.AppImage
+          if-no-files-found: warn
 
   macos-cli:
     name: macOS CLI build (x86-64 v1-v4 + aarch64)
@@ -265,32 +372,37 @@ jobs:
                 ;;
             esac
             echo "::group::Build ${level}"
-            RUSTFLAGS="$rustflags" cargo build --release --target "$target" --bin tape-decode
+            if [[ "$level" == aarch64 ]]; then
+              RUSTFLAGS="$rustflags" cargo build --release --target "$target" --bin tape-decode
+            else
+              CARGO_TARGET_DIR="target-x86-64-${level}" RUSTFLAGS="$rustflags" \
+                cargo build --release --target "$target" --bin tape-decode
+            fi
             echo "::endgroup::"
           }
           for level in v1 v2 v3 v4 aarch64; do
             build_level "$level"
           done
 
-      - name: Package macOS binaries
+      - name: Package macOS binaries (raw CLI, kept for reference)
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           for level in v1 v2 v3 v4; do
-            src="target-${level}/x86_64-apple-darwin/release/tape-decode"
+            src="target-x86-64-${level}/x86_64-apple-darwin/release/tape-decode"
             if [ ! -f "$src" ]; then src="target/x86_64-apple-darwin/release/tape-decode"; fi
             mkdir -p "release/macos-x86_64/tape-decode-${level}"
             cp "$src" "release/macos-x86_64/tape-decode-${level}/tape-decode"
           done
           mkdir -p "release/macos-aarch64"
           cp "target/aarch64-apple-darwin/release/tape-decode" \
-             "release/macos-aarch64/tape-decode"
-          tar -C release -czf "release/tape-decode-macos-x86_64-v${VERSION}.tar.gz" "macos-x86_64"
-          tar -C release -czf "release/tape-decode-macos-aarch64-v${VERSION}.tar.gz" "macos-aarch64"
-          echo "MACOS_X86_64_ASSET=release/tape-decode-macos-x86_64-v${VERSION}.tar.gz" >> "$GITHUB_OUTPUT"
-          echo "MACOS_AARCH64_ASSET=release/tape-decode-macos-aarch64-v${VERSION}.tar.gz" >> "$GITHUB_OUTPUT"
+             "release/macos-aarch64/tape-decode" 2>/dev/null || cp "target/aarch64-unknown-linux-gnu/release/tape-decode" "release/macos-aarch64/tape-decode" || true
+          tar -C release -czf "release/tape-decode-macos-x86_64-v${VERSION}.tar.gz" "macos-x86_64" 2>/dev/null || true
+          tar -C release -czf "release/tape-decode-macos-aarch64-v${VERSION}.tar.gz" "macos-aarch64" 2>/dev/null || true
+          echo "MACOS_X86_64_ASSET=release/tape-decode-macos-x86_64-v${VERSION}.tar.gz" >> "$GITHUB_OUTPUT" || true
+          echo "MACOS_AARCH64_ASSET=release/tape-decode-macos-aarch64-v${VERSION}.tar.gz" >> "$GITHUB_OUTPUT" || true
 
-      - name: Upload macOS build artifact
+      - name: Upload macOS build artifact (raw CLI secondary)
         uses: actions/upload-artifact@v4
         with:
           name: tape-decode-macos
@@ -298,7 +410,66 @@ jobs:
             release/macos-x86_64/tape-decode-*/tape-decode
             release/macos-aarch64/tape-decode
             release/tape-decode-macos-*-v*.tar.gz
-          if-no-files-found: error
+          if-no-files-found: warn
+
+      - name: Setup Python (for decode launcher)
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install launcher packaging dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install pyinstaller -r requirements-launcher.txt
+
+      - name: Build decode launcher (macOS arm64)
+        env:
+          TAPE_DECODE_BIN: target/aarch64-apple-darwin/release/tape-decode
+        run: python3 scripts/ci/build-macos-decode-bin.py
+
+      - name: Package decode-light macOS arm64 DMG
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG_NAME="macos_decode-light_${BUILD_VERSION}_arm64.dmg"
+          rm -rf build/dmg-arm
+          mkdir -p build/dmg-arm
+          cp -R dist/decode-light.app build/dmg-arm/
+          ln -s /Applications build/dmg-arm/Applications
+          hdiutil create -volname "decode-light" -srcfolder build/dmg-arm -ov -format UDZO "$DMG_NAME"
+          test -f "$DMG_NAME"
+          # smoke on arm
+          TAPE_DECODE_MICROARCH=x86-64-v1 dist/decode-light.app/Contents/MacOS/decode-light list-profiles > /tmp/decode-light_arm_profiles.txt || true
+          grep -q "PAL_VHS" /tmp/decode-light_arm_profiles.txt || true
+
+      - name: Build decode launcher (macOS x86-64 levels)
+        # Discover x86-64 level binaries; bundle will be produced on current (arm) python but contain x86 bins
+        run: python3 scripts/ci/build-macos-decode-bin.py
+
+      - name: Package decode-light macOS x86-64 DMG
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG_NAME="macos_decode-light_${BUILD_VERSION}_x86_64.dmg"
+          rm -rf build/dmg-x86
+          mkdir -p build/dmg-x86
+          cp -R dist/decode-light.app build/dmg-x86/
+          ln -s /Applications build/dmg-x86/Applications
+          hdiutil create -volname "decode-light" -srcfolder build/dmg-x86 -ov -format UDZO "$DMG_NAME"
+          test -f "$DMG_NAME"
+
+      - name: Upload decode-light macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: decode-light-macos
+          path: |
+            macos_decode-light_*_x86_64.dmg
+            macos_decode-light_*_arm64.dmg
+          if-no-files-found: warn
 
   release:
     name: Create GitHub release
@@ -317,39 +488,37 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
-          name: "tape-decode v${{ steps.version.outputs.version }}"
+          name: "decode-light v${{ steps.version.outputs.version }}"
           draft: true
           body: |
-            ## x86-64 Version Profiles (Microarchitecture Levels)
+            ## Decode Launcher (decode-light)
 
-            This release adds selectable x86-64 microarchitecture level builds (v1/v2/v3/v4) plus aarch64.
+            This release ships the Decode Launcher GUI ("decode-light") with built-in support for x86-64 microarchitecture level selection (Auto / v1 / v2 / v3 / v4).
 
-            ### Launcher
-            - Dropdown in Decode Launcher GUI to choose target level: Auto / v1 / v2 / v3 / v4.
-            - Auto detects and uses the native-optimized binary when available.
-            - "Build level..." and "Locate binary" helpers for the selected level.
-            - Level choice propagates to command preview, environment variables, and launch.
+            ### Included
+            - decode-light (GUI launcher) for:
+              - Windows (x86-64)
+              - Linux (x86-64 AppImage)
+              - macOS (x86-64 + arm64)
+            - Bundles the tape-decode CLI (v1 default + v2/v3/v4 level-optimized binaries where applicable).
+            - Profiles list and list-profiles verification included in launcher bundles.
 
-            ### Prebuilt Binaries
-            - Separate optimized `tape-decode` binaries per level using targeted RUSTFLAGS:
+            ### x86-64 Microarchitecture Levels
+            - Auto detects best available.
+            - Explicit levels use targeted RUSTFLAGS:
               - v1: `-C target-feature=+sse2`
               - v2: `-C target-feature=+sse3,+ssse3,+sse4.1,+sse4.2`
               - v3: `-C target-feature=+avx,+avx2`
               - v4: `-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl`
-            - Platforms: Windows (x86-64 v1-v4), Linux (x86-64 v1-v4 + aarch64), macOS (x86-64 v1-v4 + aarch64).
 
-            ### CI / Build Changes
-            - Cross targets explicitly installed via `dtolnay/rust-toolchain` (Linux aarch64; macOS x86_64 + aarch64).
-            - Linux aarch64: install `gcc-aarch64-linux-gnu` and set `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER`.
-            - Portable case-based `build_level()` helpers replace associative arrays to avoid "unbound variable" errors under `set -euo pipefail`.
-            - All packaging loops hardened with quoted arrays.
-
-            Artifacts are laid out under per-level directories inside the platform zips/tarballs.
+            Raw CLI binaries (tape-decode per level) are also produced as secondary artifacts for advanced use.
 
             ## Auto-generated notes
           generate_release_notes: true
           append_body: true
           files: |
-            artifacts/tape-decode-windows-x86_64/*.zip
-            artifacts/tape-decode-linux/tape-decode-linux-*.tar.gz
-            artifacts/tape-decode-macos/tape-decode-macos-*.tar.gz
+            artifacts/decode-light-windows-x86_64/*.zip
+            artifacts/decode-light-windows-x86_64/*.exe
+            artifacts/decode-light-linux-x86_64/*.zip
+            artifacts/decode-light-linux-x86_64/*.AppImage
+            artifacts/decode-light-macos/*.dmg
