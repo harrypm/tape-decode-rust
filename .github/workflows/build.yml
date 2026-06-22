@@ -251,6 +251,77 @@ jobs:
             release/tape-decode-linux-*-v*.tar.gz
           if-no-files-found: warn
 
+  linux-decode:
+    name: Linux decode-light AppImage (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            appimagetool: appimagetool-x86_64.AppImage
+            appimage_arch: x86_64
+            artifact_suffix: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            appimagetool: appimagetool-aarch64.AppImage
+            appimage_arch: aarch64
+            artifact_suffix: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve build version
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.release_tag }}" ]]; then
+            VERSION="${{ github.event.inputs.release_tag }}"
+          else
+            VERSION="$(git describe --tags --always --dirty)"
+          fi
+          VERSION="${VERSION#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build tape-decode binary (single)
+        if: matrix.arch != 'x86_64'
+        run: cargo build --release --target "${{ matrix.target }}" --bin tape-decode
+
+      - name: Build tape-decode binaries (x86-64 v1-v4)
+        if: matrix.arch == 'x86_64'
+        run: |
+          set -euo pipefail
+          build_level() {
+            local level="$1"
+            local rustflags=""
+            case "$level" in
+              v1) rustflags="-C target-feature=+sse2" ;;
+              v2) rustflags="-C target-feature=+sse3,+ssse3,+sse4.1,+sse4.2" ;;
+              v3) rustflags="-C target-feature=+avx,+avx2" ;;
+              v4) rustflags="-C target-feature=+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl" ;;
+            esac
+            echo "::group::Build ${level}"
+            CARGO_TARGET_DIR="target-x86-64-${level}" RUSTFLAGS="$rustflags" \
+              cargo build --release --target "${{ matrix.target }}" --bin tape-decode
+            echo "::endgroup::"
+          }
+          for level in v1 v2 v3 v4; do
+            build_level "$level"
+          done
+
       - name: Setup Python (for decode launcher)
         uses: actions/setup-python@v6
         with:
@@ -261,15 +332,23 @@ jobs:
           python3 -m pip install --upgrade pip
           pip install pyinstaller -r requirements-launcher.txt
 
-      - name: Build decode launcher (Linux x86-64 v1-v4)
+      - name: Build launcher binary
+        if: matrix.arch != 'x86_64'
+        env:
+          TAPE_DECODE_BIN: target/${{ matrix.target }}/release/tape-decode
         run: python3 scripts/ci/build-linux-decode-bin.py
 
-      - name: Build Linux AppImage for decode-light
+      - name: Build launcher binary (with microarch levels)
+        if: matrix.arch == 'x86_64'
+        run: python3 scripts/ci/build-linux-decode-bin.py
+
+      - name: Build AppDir and AppImage
         env:
           BUILD_VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
+
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
@@ -281,45 +360,51 @@ jobs:
           cp resources/appimage/AppRun AppDir/AppRun
           chmod +x AppDir/AppRun
 
-          cp resources/icon/tape-decode-rust-256.png AppDir/usr/share/icons/hicolor/256x256/apps/decode-light.png || true
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          cp resources/icon/tape-decode-rust-256.png AppDir/usr/share/icons/hicolor/256x256/apps/decode-light.png
           cp resources/icon/tape-decode-rust-256.png AppDir/decode-light.png
 
           # Stage icon resources tree so launcher runtime can discover PNG for setWindowIcon/taskbar
           mkdir -p AppDir/resources/icon
-          cp resources/icon/tape-decode-rust-256.png AppDir/resources/icon/ || true
+          cp resources/icon/tape-decode-rust-256.png AppDir/resources/icon/
           cp resources/icon/tape-decode-rust-256.png AppDir/tape-decode-rust-256.png || true
           cp resources/icon/tape-decode-rust-256.png AppDir/decode-light.png
 
-          # .DirIcon for better taskbar / file manager icon for the AppImage
+          # .DirIcon is critical for the AppImage to show its icon in file managers and taskbars
           cp resources/icon/tape-decode-rust-256.png AppDir/.DirIcon || true
           ln -sf decode-light.png AppDir/.DirIcon 2>/dev/null || cp AppDir/decode-light.png AppDir/.DirIcon || true
 
           ln -sf usr/share/applications/decode-light.desktop AppDir/decode-light.desktop
 
-          APPIMAGE_TOOL=appimagetool-x86_64.AppImage
-          APPIMAGE_NAME="linux_decode-light_${BUILD_VERSION}_x86_64.AppImage"
+          APPIMAGE_TOOL="${{ matrix.appimagetool }}"
+          APPIMAGE_NAME="linux_decode-light_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.AppImage"
 
           wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/${APPIMAGE_TOOL}"
           chmod +x "${APPIMAGE_TOOL}"
           "./${APPIMAGE_TOOL}" --appimage-extract
-          env -u SOURCE_DATE_EPOCH ARCH=x86_64 ./squashfs-root/AppRun AppDir "${APPIMAGE_NAME}"
+          env -u SOURCE_DATE_EPOCH ARCH=${{ matrix.appimage_arch }} ./squashfs-root/AppRun AppDir "${APPIMAGE_NAME}"
           chmod +x "${APPIMAGE_NAME}"
 
-          # quick smoke
-          TAPE_DECODE_MICROARCH=x86-64-v1 APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-light_profiles.txt || true
+          # Only force a microarch level on x86-64 builds. On arm64 the bundled binary is aarch64.
+          if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
+            TAPE_DECODE_MICROARCH=x86-64-v1 APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-light_profiles.txt || true
+          else
+            APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-light_profiles.txt || true
+          fi
           grep -q "PAL_VHS" /tmp/decode-light_profiles.txt || true
 
-          ZIP_NAME="linux_decode-light_${BUILD_VERSION}_x86_64.zip"
+          ZIP_NAME="linux_decode-light_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.zip"
           zip -j "${ZIP_NAME}" "${APPIMAGE_NAME}"
           test -f "${ZIP_NAME}"
+          test "$(unzip -Z1 "${ZIP_NAME}" | wc -l)" -eq 1
 
       - name: Upload decode-light Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: decode-light-linux-x86_64
+          name: decode-light-linux-${{ matrix.artifact_suffix }}
           path: |
-            linux_decode-light_*_x86_64.zip
-            linux_decode-light_*_x86_64.AppImage
+            linux_decode-light_*_${{ matrix.artifact_suffix }}.zip
+            linux_decode-light_*_${{ matrix.artifact_suffix }}.AppImage
           if-no-files-found: warn
 
   macos-cli:
@@ -449,8 +534,8 @@ jobs:
           ln -s /Applications build/dmg-arm/Applications
           hdiutil create -volname "decode-light" -srcfolder build/dmg-arm -ov -format UDZO "$DMG_NAME"
           test -f "$DMG_NAME"
-          # smoke on arm
-          TAPE_DECODE_MICROARCH=x86-64-v1 dist/decode-light.app/Contents/MacOS/decode-light list-profiles > /tmp/decode-light_arm_profiles.txt || true
+          # smoke on arm64 bundle (do not force x86-64 microarch)
+          dist/decode-light.app/Contents/MacOS/decode-light list-profiles > /tmp/decode-light_arm_profiles.txt || true
           grep -q "PAL_VHS" /tmp/decode-light_arm_profiles.txt || true
 
       - name: Build decode launcher (macOS x86-64 levels)
@@ -471,6 +556,10 @@ jobs:
           hdiutil create -volname "decode-light" -srcfolder build/dmg-x86 -ov -format UDZO "$DMG_NAME"
           test -f "$DMG_NAME"
 
+          # smoke x86-64 levels bundle
+          dist/decode-light.app/Contents/MacOS/decode-light list-profiles > /tmp/decode-light_x86_profiles.txt || true
+          grep -q "PAL_VHS" /tmp/decode-light_x86_profiles.txt || true
+
       - name: Upload decode-light macOS artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -482,12 +571,26 @@ jobs:
 
   release:
     name: Create GitHub release
-    needs: [windows-cli, linux-cli, macos-cli]
+    needs: [windows-cli, linux-cli, linux-decode, macos-cli]
     if: github.event_name == 'workflow_dispatch' && inputs.create_release == true
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - name: Resolve build version
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.release_tag }}" ]]; then
+            VERSION="${{ github.event.inputs.release_tag }}"
+          else
+            VERSION="$(git describe --tags --always --dirty)"
+          fi
+          VERSION="${VERSION#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -530,4 +633,6 @@ jobs:
             artifacts/decode-light-windows-x86_64/*.exe
             artifacts/decode-light-linux-x86_64/*.zip
             artifacts/decode-light-linux-x86_64/*.AppImage
+            artifacts/decode-light-linux-arm64/*.zip
+            artifacts/decode-light-linux-arm64/*.AppImage
             artifacts/decode-light-macos/*.dmg
