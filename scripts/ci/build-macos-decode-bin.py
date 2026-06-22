@@ -97,6 +97,8 @@ def main() -> None:
         "resources/icon/tape-decode-rust.icns",
         "--onefile",
         "--windowed",
+        "-y",
+        "--clean",
         "--name",
         "decode-rust-gui",
     ]
