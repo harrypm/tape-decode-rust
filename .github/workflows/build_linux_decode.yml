@@ -41,7 +41,7 @@ jobs:
             appimage_arch: aarch64
             artifact_suffix: arm64
 
-    name: Build decode-light AppImage (${{ matrix.arch }})
+    name: Build decode-rust-gui AppImage (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     env:
       SETUPTOOLS_RUST_CARGO_PROFILE: release
@@ -129,31 +129,31 @@ jobs:
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
 
-          cp dist/decode-light AppDir/usr/bin/decode-light
-          chmod +x AppDir/usr/bin/decode-light
+          cp dist/decode-rust-gui AppDir/usr/bin/decode-rust-gui
+          chmod +x AppDir/usr/bin/decode-rust-gui
 
-          cp resources/appimage/decode-light.desktop AppDir/usr/share/applications/decode-light.desktop
+          cp resources/appimage/decode-rust-gui.desktop AppDir/usr/share/applications/decode-rust-gui.desktop
           cp resources/appimage/AppRun AppDir/AppRun
           chmod +x AppDir/AppRun
 
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-          cp resources/icon/tape-decode-rust-256.png AppDir/usr/share/icons/hicolor/256x256/apps/decode-light.png
-          cp resources/icon/tape-decode-rust-256.png AppDir/decode-light.png
+          cp resources/icon/tape-decode-rust-256.png AppDir/usr/share/icons/hicolor/256x256/apps/decode-rust-gui.png
+          cp resources/icon/tape-decode-rust-256.png AppDir/decode-rust-gui.png
 
           # Stage icon resources tree so launcher runtime can discover PNG for setWindowIcon/taskbar
           mkdir -p AppDir/resources/icon
           cp resources/icon/tape-decode-rust-256.png AppDir/resources/icon/
           cp resources/icon/tape-decode-rust-256.png AppDir/tape-decode-rust-256.png || true
-          cp resources/icon/tape-decode-rust-256.png AppDir/decode-light.png
+          cp resources/icon/tape-decode-rust-256.png AppDir/decode-rust-gui.png
 
           # .DirIcon is critical for the AppImage to show its icon in file managers and taskbars
           cp resources/icon/tape-decode-rust-256.png AppDir/.DirIcon || true
-          ln -sf decode-light.png AppDir/.DirIcon 2>/dev/null || cp AppDir/decode-light.png AppDir/.DirIcon || true
+          ln -sf decode-rust-gui.png AppDir/.DirIcon 2>/dev/null || cp AppDir/decode-rust-gui.png AppDir/.DirIcon || true
 
-          ln -sf usr/share/applications/decode-light.desktop AppDir/decode-light.desktop
+          ln -sf usr/share/applications/decode-rust-gui.desktop AppDir/decode-rust-gui.desktop
 
           APPIMAGE_TOOL="${{ matrix.appimagetool }}"
-          APPIMAGE_NAME="linux_decode-light_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.AppImage"
+          APPIMAGE_NAME="decode-rust-gui-linux_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.AppImage"
 
           wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/${APPIMAGE_TOOL}"
           chmod +x "${APPIMAGE_TOOL}"
@@ -163,13 +163,13 @@ jobs:
 
           # Only force a microarch level on x86-64 builds. On arm64 the bundled binary is aarch64.
           if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
-            TAPE_DECODE_MICROARCH=x86-64-v1 APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-light_profiles.txt || true
+            TAPE_DECODE_MICROARCH=x86-64-v1 APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-rust-gui_profiles.txt || true
           else
-            APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-light_profiles.txt || true
+            APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-rust-gui_profiles.txt || true
           fi
-          grep -q "PAL_VHS" /tmp/decode-light_profiles.txt || true
+          grep -q "PAL_VHS" /tmp/decode-rust-gui_profiles.txt || true
 
-          ZIP_NAME="linux_decode-light_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.zip"
+          ZIP_NAME="decode-rust-gui-linux_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.zip"
           zip -j "${ZIP_NAME}" "${APPIMAGE_NAME}"
           test -f "${ZIP_NAME}"
           test "$(unzip -Z1 "${ZIP_NAME}" | wc -l)" -eq 1
@@ -178,7 +178,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-zip-${{ matrix.arch }}
-          path: linux_decode-light_*_${{ matrix.artifact_suffix }}.zip
+          path: decode-rust-gui-linux_*_${{ matrix.artifact_suffix }}.zip
           if-no-files-found: error
 
   release:
@@ -229,5 +229,5 @@ jobs:
           name: ${{ steps.tag.outputs.tag }}
           generate_release_notes: true
           files: |
-            release-assets/**/linux_decode-light_*_x86_64.zip
-            release-assets/**/linux_decode-light_*_arm64.zip
+            release-assets/**/decode-rust-gui-linux_*_x86_64.zip
+            release-assets/**/decode-rust-gui-linux_*_arm64.zip

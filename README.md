@@ -28,7 +28,7 @@ Cross-platform GUI package workflows are also available for:
 tape-decode --help
 ```
 
-## Decode Launcher GUI (Qt6)
+## Decode Launcher GUI (decode-rust-gui)
 
 The repository includes a Qt6 launcher (`decode.py` + `decode_launcher.py`) modeled after the vhs-decode Decode Launcher and wired to `tape-decode`.
 
@@ -75,9 +75,9 @@ For Linux arm64 local builds, replace `x86_64-unknown-linux-gnu` with `aarch64-u
 GitHub Actions release formatting now mirrors MISRC:
 - `workflow_dispatch` supports `create_release` and `release_tag` inputs.
 - Artifact names are versioned and architecture-scoped:
-  - `linux_decode-light_<version>_<arch>.zip`
-  - `windows_decode-light_<version>_<arch>.zip`
-  - `macos_decode-light_<version>_<arch>.dmg`
+  - `decode-rust-gui-linux_<version>_<arch>.zip` / `.AppImage`
+  - `decode-rust-gui-windows_<version>_<arch>.exe` / `.zip`
+  - `decode-rust-gui-macos_<version>_<arch>.dmg` / `.zip`
 - Version is resolved from tags (`v*`) or `scripts/ci/git-version.sh` fallback (`dev-<sha>` style).
 
 For release artifacts, trigger:

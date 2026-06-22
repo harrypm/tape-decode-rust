@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=decode-rust-gui
+Exec=decode-rust-gui
+Terminal=false
+Icon=decode-rust-gui
+Type=Application
+Categories=AudioVideo;Video;
+Comment=decode-rust-gui Decode Launcher

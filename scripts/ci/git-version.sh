@@ -4,7 +4,7 @@ set -eu
 V="${DECODE_LIGHT_VERSION_OVERRIDE:-${DECODE_LIGHT_VERSION:-}}"
 
 if [ -z "$V" ]; then
-	V=$(git describe --tags --dirty --match 'v*' --match 'decode-light-*' 2>/dev/null || true)
+V=$(git describe --tags --dirty --match 'v*' --match 'decode-light-*' --match 'decode-rust-gui-*' 2>/dev/null || true)
 fi
 
 if [ -z "$V" ]; then
@@ -21,6 +21,9 @@ fi
 case "$V" in
 	decode-light-*)
 		V="${V#decode-light-}"
+		;;
+	decode-rust-gui-*)
+		V="${V#decode-rust-gui-}"
 		;;
 esac
 

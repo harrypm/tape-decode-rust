@@ -96,25 +96,25 @@ jobs:
         shell: bash
         run: python scripts/ci/build-windows-decode-bin.py
 
-      - name: Package decode-light Windows artifact
+      - name: Package decode-rust-gui Windows artifact
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
-          EXE="dist/decode-light.exe"
+          EXE="dist/decode-rust-gui.exe"
           if [ ! -f "$EXE" ]; then
-            echo "decode-light.exe not produced"
+            echo "decode-rust-gui.exe not produced"
             ls -la dist/ || true
             exit 1
           fi
-          cp "$EXE" "decode-light-windows_${VERSION}_x86_64.exe"
+          cp "$EXE" "decode-rust-gui-windows_${VERSION}_x86_64.exe"
 
-      - name: Upload decode-light Windows artifact
+      - name: Upload decode-rust-gui Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: decode-light-windows-x86_64
+          name: decode-rust-gui-windows-x86_64
           path: |
-            decode-light-windows_*_x86_64.exe
+            decode-rust-gui-windows_*_x86_64.exe
           if-no-files-found: warn
 
       - name: Package Windows CLI (raw, secondary)
@@ -249,7 +249,7 @@ jobs:
           if-no-files-found: warn
 
   linux-decode:
-    name: Linux decode-light AppImage (${{ matrix.arch }})
+    name: Linux decode-rust-gui AppImage (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
@@ -350,31 +350,31 @@ jobs:
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
 
-          cp dist/decode-light AppDir/usr/bin/decode-light
-          chmod +x AppDir/usr/bin/decode-light
+          cp dist/decode-rust-gui AppDir/usr/bin/decode-rust-gui
+          chmod +x AppDir/usr/bin/decode-rust-gui
 
-          cp resources/appimage/decode-light.desktop AppDir/usr/share/applications/decode-light.desktop
+          cp resources/appimage/decode-rust-gui.desktop AppDir/usr/share/applications/decode-rust-gui.desktop
           cp resources/appimage/AppRun AppDir/AppRun
           chmod +x AppDir/AppRun
 
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-          cp resources/icon/tape-decode-rust-256.png AppDir/usr/share/icons/hicolor/256x256/apps/decode-light.png
-          cp resources/icon/tape-decode-rust-256.png AppDir/decode-light.png
+          cp resources/icon/tape-decode-rust-256.png AppDir/usr/share/icons/hicolor/256x256/apps/decode-rust-gui.png
+          cp resources/icon/tape-decode-rust-256.png AppDir/decode-rust-gui.png
 
           # Stage icon resources tree so launcher runtime can discover PNG for setWindowIcon/taskbar
           mkdir -p AppDir/resources/icon
           cp resources/icon/tape-decode-rust-256.png AppDir/resources/icon/
           cp resources/icon/tape-decode-rust-256.png AppDir/tape-decode-rust-256.png || true
-          cp resources/icon/tape-decode-rust-256.png AppDir/decode-light.png
+          cp resources/icon/tape-decode-rust-256.png AppDir/decode-rust-gui.png
 
           # .DirIcon is critical for the AppImage to show its icon in file managers and taskbars
           cp resources/icon/tape-decode-rust-256.png AppDir/.DirIcon || true
-          ln -sf decode-light.png AppDir/.DirIcon 2>/dev/null || cp AppDir/decode-light.png AppDir/.DirIcon || true
+          ln -sf decode-rust-gui.png AppDir/.DirIcon 2>/dev/null || cp AppDir/decode-rust-gui.png AppDir/.DirIcon || true
 
-          ln -sf usr/share/applications/decode-light.desktop AppDir/decode-light.desktop
+          ln -sf usr/share/applications/decode-rust-gui.desktop AppDir/decode-rust-gui.desktop
 
           APPIMAGE_TOOL="${{ matrix.appimagetool }}"
-          APPIMAGE_NAME="decode-light-linux_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.AppImage"
+          APPIMAGE_NAME="decode-rust-gui-linux_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.AppImage"
 
           wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/${APPIMAGE_TOOL}"
           chmod +x "${APPIMAGE_TOOL}"
@@ -384,24 +384,24 @@ jobs:
 
           # Only force a microarch level on x86-64 builds. On arm64 the bundled binary is aarch64.
           if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
-            TAPE_DECODE_MICROARCH=x86-64-v1 APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-light_profiles.txt || true
+            TAPE_DECODE_MICROARCH=x86-64-v1 APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-rust-gui_profiles.txt || true
           else
-            APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-light_profiles.txt || true
+            APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-rust-gui_profiles.txt || true
           fi
-          grep -q "PAL_VHS" /tmp/decode-light_profiles.txt || true
+          grep -q "PAL_VHS" /tmp/decode-rust-gui_profiles.txt || true
 
-          ZIP_NAME="decode-light-linux_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.zip"
+          ZIP_NAME="decode-rust-gui-linux_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.zip"
           zip -j "${ZIP_NAME}" "${APPIMAGE_NAME}"
           test -f "${ZIP_NAME}"
           test "$(unzip -Z1 "${ZIP_NAME}" | wc -l)" -eq 1
 
-      - name: Upload decode-light Linux artifact
+      - name: Upload decode-rust-gui Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: decode-light-linux-${{ matrix.artifact_suffix }}
+          name: decode-rust-gui-linux-${{ matrix.artifact_suffix }}
           path: |
-            decode-light-linux_*_${{ matrix.artifact_suffix }}.zip
-            decode-light-linux_*_${{ matrix.artifact_suffix }}.AppImage
+            decode-rust-gui-linux_*_${{ matrix.artifact_suffix }}.zip
+            decode-rust-gui-linux_*_${{ matrix.artifact_suffix }}.AppImage
           if-no-files-found: warn
 
   macos-cli:
@@ -518,19 +518,19 @@ jobs:
           TAPE_DECODE_BIN: target/aarch64-apple-darwin/release/tape-decode
         run: python3 scripts/ci/build-macos-decode-bin.py
 
-      - name: Package decode-light macOS arm64 DMG
+      - name: Package decode-rust-gui macOS arm64 DMG
         env:
           BUILD_VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          DMG_NAME="decode-light-macos_${BUILD_VERSION}_arm64.dmg"
-          ZIP_NAME="decode-light-macos_${BUILD_VERSION}_arm64.zip"
+          DMG_NAME="decode-rust-gui-macos_${BUILD_VERSION}_arm64.dmg"
+          ZIP_NAME="decode-rust-gui-macos_${BUILD_VERSION}_arm64.zip"
           rm -rf build/dmg-arm
           mkdir -p build/dmg-arm
-          cp -R dist/decode-light.app build/dmg-arm/
+          cp -R dist/decode-rust-gui.app build/dmg-arm/
           ln -s /Applications build/dmg-arm/Applications
-          hdiutil create -volname "decode-light" -srcfolder build/dmg-arm -ov -format UDZO "$DMG_NAME"
+          hdiutil create -volname "decode-rust-gui" -srcfolder build/dmg-arm -ov -format UDZO "$DMG_NAME"
           test -f "$DMG_NAME"
 
           # zip the DMG (consistent with Linux AppImage packaging)
@@ -539,26 +539,26 @@ jobs:
           test "$(unzip -Z1 "$ZIP_NAME" | wc -l)" -eq 1
 
           # smoke on arm64 bundle (do not force x86-64 microarch)
-          dist/decode-light.app/Contents/MacOS/decode-light list-profiles > /tmp/decode-light_arm_profiles.txt || true
-          grep -q "PAL_VHS" /tmp/decode-light_arm_profiles.txt || true
+          dist/decode-rust-gui.app/Contents/MacOS/decode-rust-gui list-profiles > /tmp/decode-rust-gui_arm_profiles.txt || true
+          grep -q "PAL_VHS" /tmp/decode-rust-gui_arm_profiles.txt || true
 
       - name: Build decode launcher (macOS x86-64 levels)
         # Discover x86-64 level binaries; bundle will be produced on current (arm) python but contain x86 bins
         run: python3 scripts/ci/build-macos-decode-bin.py
 
-      - name: Package decode-light macOS x86-64 DMG
+      - name: Package decode-rust-gui macOS x86-64 DMG
         env:
           BUILD_VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          DMG_NAME="decode-light-macos_${BUILD_VERSION}_x86_64.dmg"
-          ZIP_NAME="decode-light-macos_${BUILD_VERSION}_x86_64.zip"
+          DMG_NAME="decode-rust-gui-macos_${BUILD_VERSION}_x86_64.dmg"
+          ZIP_NAME="decode-rust-gui-macos_${BUILD_VERSION}_x86_64.zip"
           rm -rf build/dmg-x86
           mkdir -p build/dmg-x86
-          cp -R dist/decode-light.app build/dmg-x86/
+          cp -R dist/decode-rust-gui.app build/dmg-x86/
           ln -s /Applications build/dmg-x86/Applications
-          hdiutil create -volname "decode-light" -srcfolder build/dmg-x86 -ov -format UDZO "$DMG_NAME"
+          hdiutil create -volname "decode-rust-gui" -srcfolder build/dmg-x86 -ov -format UDZO "$DMG_NAME"
           test -f "$DMG_NAME"
 
           # zip the DMG (consistent with Linux AppImage packaging)
@@ -567,18 +567,18 @@ jobs:
           test "$(unzip -Z1 "$ZIP_NAME" | wc -l)" -eq 1
 
           # smoke x86-64 levels bundle
-          dist/decode-light.app/Contents/MacOS/decode-light list-profiles > /tmp/decode-light_x86_profiles.txt || true
-          grep -q "PAL_VHS" /tmp/decode-light_x86_profiles.txt || true
+          dist/decode-rust-gui.app/Contents/MacOS/decode-rust-gui list-profiles > /tmp/decode-rust-gui_x86_profiles.txt || true
+          grep -q "PAL_VHS" /tmp/decode-rust-gui_x86_profiles.txt || true
 
-      - name: Upload decode-light macOS artifacts
+      - name: Upload decode-rust-gui macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: decode-light-macos
+          name: decode-rust-gui-macos
           path: |
-            decode-light-macos_*_x86_64.dmg
-            decode-light-macos_*_arm64.dmg
-            decode-light-macos_*_x86_64.zip
-            decode-light-macos_*_arm64.zip
+            decode-rust-gui-macos_*_x86_64.dmg
+            decode-rust-gui-macos_*_arm64.dmg
+            decode-rust-gui-macos_*_x86_64.zip
+            decode-rust-gui-macos_*_arm64.zip
           if-no-files-found: warn
 
   release:
@@ -612,15 +612,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
-          name: "decode-light v${{ steps.version.outputs.version }}"
+          name: "decode-rust-gui v${{ steps.version.outputs.version }}"
           draft: true
           body: |
-            ## Decode Launcher (decode-light)
+            ## Decode Launcher (decode-rust-gui)
 
-            This release ships the Decode Launcher GUI ("decode-light") with built-in support for x86-64 microarchitecture level selection (Auto / v1 / v2 / v3 / v4).
+            This release ships the Decode Launcher GUI ("decode-rust-gui") with built-in support for x86-64 microarchitecture level selection (Auto / v1 / v2 / v3 / v4).
 
             ### Included
-            - decode-light (GUI launcher) for:
+            - decode-rust-gui (GUI launcher) for:
               - Windows (x86-64)
               - Linux (x86-64 + arm64 AppImage)
               - macOS (x86-64 + arm64)
@@ -642,10 +642,10 @@ jobs:
           generate_release_notes: true
           append_body: true
           files: |
-            artifacts/decode-light-windows-x86_64/*.exe
-            artifacts/decode-light-linux-x86_64/*.zip
-            artifacts/decode-light-linux-x86_64/*.AppImage
-            artifacts/decode-light-linux-arm64/*.zip
-            artifacts/decode-light-linux-arm64/*.AppImage
-            artifacts/decode-light-macos/*.dmg
-            artifacts/decode-light-macos/*.zip
+            artifacts/decode-rust-gui-windows-x86_64/*.exe
+            artifacts/decode-rust-gui-linux-x86_64/*.zip
+            artifacts/decode-rust-gui-linux-x86_64/*.AppImage
+            artifacts/decode-rust-gui-linux-arm64/*.zip
+            artifacts/decode-rust-gui-linux-arm64/*.AppImage
+            artifacts/decode-rust-gui-macos/*.dmg
+            artifacts/decode-rust-gui-macos/*.zip

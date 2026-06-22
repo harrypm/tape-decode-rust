@@ -182,7 +182,7 @@ def _resolve_icon_path() -> Optional[Path]:
         candidates.extend([
             mp / "resources" / "icon" / "tape-decode-rust-256.png",
             mp / "tape-decode-rust-256.png",
-            mp / "decode-light.png",
+            mp / "decode-rust-gui.png",
         ])
 
     # Next to the frozen executable (AppImage mount, extracted, or onefile dir)
@@ -192,19 +192,19 @@ def _resolve_icon_path() -> Optional[Path]:
             candidates.extend([
                 exe_dir / "resources" / "icon" / "tape-decode-rust-256.png",
                 exe_dir / "tape-decode-rust-256.png",
-                exe_dir / "decode-light.png",
+                exe_dir / "decode-rust-gui.png",
             ])
-            # AppImage mount layout: exe at <mount>/usr/bin/decode-light
+            # AppImage mount layout: exe at <mount>/usr/bin/decode-rust-gui
             # hicolor and .DirIcon live at <mount>/usr/share/... and <mount>/.DirIcon
             mount_root = exe_dir.parent  # <mount>/usr
-            candidates.append(mount_root / "share" / "icons" / "hicolor" / "256x256" / "apps" / "decode-light.png")
-            candidates.append(mount_root.parent / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps" / "decode-light.png")
+            candidates.append(mount_root / "share" / "icons" / "hicolor" / "256x256" / "apps" / "decode-rust-gui.png")
+            candidates.append(mount_root.parent / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps" / "decode-rust-gui.png")
             # Walk up a few levels to find AppDir root or mount root (robustness)
             p = exe_dir
             for _ in range(6):
-                candidates.append(p / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps" / "decode-light.png")
+                candidates.append(p / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps" / "decode-rust-gui.png")
                 candidates.append(p / ".DirIcon")
-                candidates.append(p / "decode-light.png")
+                candidates.append(p / "decode-rust-gui.png")
                 if (p / ".DirIcon").exists() or (p / "usr" / "share").exists():
                     break
                 p = p.parent

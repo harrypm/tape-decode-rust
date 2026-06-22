@@ -92,12 +92,12 @@ def main() -> None:
         "--add-data",
         f"resources/icon/tape-decode-rust-256.png{_platform_sep()}tape-decode-rust-256.png",
         "--add-data",
-        f"resources/icon/tape-decode-rust-256.png{_platform_sep()}decode-light.png",
+        f"resources/icon/tape-decode-rust-256.png{_platform_sep()}decode-rust-gui.png",
         "--icon",
         "resources/icon/tape-decode-rust-256.png",
         "--onefile",
         "--name",
-        "decode-light",
+        "decode-rust-gui",
     ]
 
     for src, dest in _discover_level_binaries():

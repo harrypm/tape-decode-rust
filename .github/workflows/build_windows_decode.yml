@@ -39,7 +39,7 @@ jobs:
             python_arch: arm64
             artifact_suffix: arm64
 
-    name: Build decode-light EXE (${{ matrix.arch }})
+    name: Build decode-rust-gui EXE (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     env:
       SETUPTOOLS_RUST_CARGO_PROFILE: release
@@ -123,9 +123,9 @@ jobs:
         shell: pwsh
         run: |
           $Version = '${{ steps.version.outputs.version }}'
-          $ExeName = "windows_decode-light_${Version}_${{ matrix.artifact_suffix }}.exe"
-          Move-Item -Path dist\decode-light.exe -Destination "dist\$ExeName" -Force
-          $ZipName = "windows_decode-light_${Version}_${{ matrix.artifact_suffix }}.zip"
+          $ExeName = "decode-rust-gui-windows_${Version}_${{ matrix.artifact_suffix }}.exe"
+          Move-Item -Path dist\decode-rust-gui.exe -Destination "dist\$ExeName" -Force
+          $ZipName = "decode-rust-gui-windows_${Version}_${{ matrix.artifact_suffix }}.zip"
           Compress-Archive -Path @("dist\$ExeName") -DestinationPath $ZipName -Force
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $ZipName))
@@ -146,7 +146,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: windows-zip-${{ matrix.arch }}
-          path: windows_decode-light_*_${{ matrix.artifact_suffix }}.zip
+          path: decode-rust-gui-windows_*_${{ matrix.artifact_suffix }}.zip
           if-no-files-found: error
 
   release:
@@ -197,5 +197,5 @@ jobs:
           name: ${{ steps.tag.outputs.tag }}
           generate_release_notes: true
           files: |
-            release-assets/**/windows_decode-light_*_x86_64.zip
-            release-assets/**/windows_decode-light_*_arm64.zip
+            release-assets/**/decode-rust-gui-windows_*_x86_64.zip
+            release-assets/**/decode-rust-gui-windows_*_arm64.zip

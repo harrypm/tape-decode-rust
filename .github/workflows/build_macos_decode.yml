@@ -37,7 +37,7 @@ jobs:
             target: x86_64-apple-darwin
             artifact_suffix: x86_64
 
-    name: Build decode-light DMG (${{ matrix.arch }})
+    name: Build decode-rust-gui DMG (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     env:
       SETUPTOOLS_RUST_CARGO_PROFILE: release
@@ -115,7 +115,7 @@ jobs:
         run: python3 scripts/ci/build-macos-decode-bin.py
 
       - name: Ad-hoc sign app bundle
-        run: codesign -s - --deep --force dist/decode-light.app
+        run: codesign -s - --deep --force dist/decode-rust-gui.app
 
       - name: Build and verify DMG
         env:
@@ -123,21 +123,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          DMG_NAME="macos_decode-light_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.dmg"
+          DMG_NAME="decode-rust-gui-macos_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.dmg"
           rm -rf build/dmg
           mkdir -p build/dmg
-          cp -R dist/decode-light.app build/dmg/
+          cp -R dist/decode-rust-gui.app build/dmg/
           ln -s /Applications build/dmg/Applications
-          hdiutil create -volname "decode-light" -srcfolder build/dmg -ov -format UDZO "$DMG_NAME"
+          hdiutil create -volname "decode-rust-gui" -srcfolder build/dmg -ov -format UDZO "$DMG_NAME"
           test -f "$DMG_NAME"
-          TAPE_DECODE_MICROARCH=x86-64-v1 dist/decode-light.app/Contents/MacOS/decode-light list-profiles > /tmp/decode-light_profiles.txt
-          grep -q "PAL_VHS" /tmp/decode-light_profiles.txt
+          TAPE_DECODE_MICROARCH=x86-64-v1 dist/decode-rust-gui.app/Contents/MacOS/decode-rust-gui list-profiles > /tmp/decode-rust-gui_profiles.txt
+          grep -q "PAL_VHS" /tmp/decode-rust-gui_profiles.txt
 
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v7
         with:
           name: macos-dmg-${{ matrix.arch }}
-          path: macos_decode-light_*_${{ matrix.artifact_suffix }}.dmg
+          path: decode-rust-gui-macos_*_${{ matrix.artifact_suffix }}.dmg
           if-no-files-found: error
 
   release:
@@ -188,5 +188,5 @@ jobs:
           name: ${{ steps.tag.outputs.tag }}
           generate_release_notes: true
           files: |
-            release-assets/**/macos_decode-light_*_x86_64.dmg
-            release-assets/**/macos_decode-light_*_arm64.dmg
+            release-assets/**/decode-rust-gui-macos_*_x86_64.dmg
+            release-assets/**/decode-rust-gui-macos_*_arm64.dmg
