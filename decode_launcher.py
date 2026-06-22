@@ -14,9 +14,7 @@ from typing import Optional
 from decode_runtime import (
     MICROARCH_AUTO,
     MICROARCH_LEVELS,
-    build_cargo_command,
     build_tape_decode_command,
-    cargo_env_for_level,
     load_profiles,
     microarch_target_cpu,
     microarch_target_dir,
@@ -35,7 +33,6 @@ try:
         QFileDialog,
         QGridLayout,
         QGroupBox,
-        QHBoxLayout,
         QLabel,
         QLineEdit,
         QMessageBox,
@@ -339,11 +336,6 @@ class DecodeLauncherWindow(QWidget):
         for ui_label, _value in MICROARCH_UI_OPTIONS:
             self.microarch_combo.addItem(ui_label)
         self.microarch_combo.setCurrentIndex(0)
-        self.microarch_build_button = QPushButton("Build level…")
-        self.microarch_build_button.setToolTip(
-            "Compile tape-decode for the selected x86-64 microarchitecture level\n"
-            "and place the binary in the matching target-x86-64-vN/ directory."
-        )
         self.microarch_locate_button = QPushButton("Locate binary")
         self.microarch_locate_button.setToolTip(
             "Show the on-disk path of the tape-decode binary that will be used\n"
@@ -352,7 +344,6 @@ class DecodeLauncherWindow(QWidget):
         non_x86 = native_host_arch() != "x86_64"
         if non_x86:
             self.microarch_combo.setEnabled(False)
-            self.microarch_build_button.setEnabled(False)
             self.microarch_locate_button.setEnabled(False)
             self.microarch_combo.setToolTip(
                 "x86-64 microarchitecture selection is only relevant on x86_64 hosts.\n"
@@ -435,14 +426,7 @@ class DecodeLauncherWindow(QWidget):
         launch_layout.addWidget(self.microarch_combo, 8, 1, 1, 2)
         launch_layout.addWidget(self.microarch_locate_button, 8, 3)
 
-        microarch_actions = QHBoxLayout()
-        microarch_actions.addWidget(self.microarch_build_button)
-        microarch_actions.addStretch(1)
-        microarch_actions_widget = QWidget()
-        microarch_actions_widget.setLayout(microarch_actions)
-        launch_layout.addWidget(microarch_actions_widget, 9, 0, 1, 4)
-
-        launch_layout.addWidget(self.include_chroma_check, 10, 0, 1, 2)
+        launch_layout.addWidget(self.include_chroma_check, 9, 0, 1, 2)
         launch_layout.addWidget(self.include_metadata_check, 10, 2, 1, 2)
         launch_layout.addWidget(self.overwrite_check, 11, 0, 1, 2)
         launch_layout.addWidget(self.ire0_adjust_check, 11, 2, 1, 2)
@@ -489,7 +473,6 @@ class DecodeLauncherWindow(QWidget):
         self.output_browse_button.clicked.connect(self._browse_output_path)
         self.profile_file_browse_button.clicked.connect(self._browse_profile_file)
         self.microarch_combo.currentIndexChanged.connect(self._refresh_tool_state)
-        self.microarch_build_button.clicked.connect(self._build_for_selected_level)
         self.microarch_locate_button.clicked.connect(self._locate_level_binary)
         self.launch_button.clicked.connect(self._launch_selected_tool)
         self.launch_tbc_tools_button.clicked.connect(self._launch_tbc_tools)
@@ -689,8 +672,7 @@ class DecodeLauncherWindow(QWidget):
                         suffix_parts.append(f"bin: {resolved[0]}")
                 except FileNotFoundError:
                     suffix_parts.append(
-                        f"binary for {level} not built "
-                        f"(use 'Build level…' to compile it)"
+                        f"binary for {level} not built"
                     )
             if level:
                 suffix_parts.append(
@@ -878,85 +860,6 @@ class DecodeLauncherWindow(QWidget):
                 return parent
         return None
 
-    def _build_for_selected_level(self) -> None:
-        level = self._selected_microarch_level()
-        if not level:
-            QMessageBox.information(
-                self,
-                "Build for level",
-                "Pick a specific x86-64 microarchitecture level first "
-                "(Auto means \"use the host default\").",
-            )
-            return
-
-        if native_host_arch() != "x86_64":
-            QMessageBox.warning(
-                self,
-                "Build for level",
-                f"This host is not x86_64 ({native_host_arch()}). "
-                "x86-64 microarchitecture levels only apply to x86_64 builds; "
-                "compile from source with RUSTFLAGS=\"-C target-cpu=native\" instead.",
-            )
-            return
-
-        if not shutil.which("cargo"):
-            QMessageBox.critical(
-                self,
-                "cargo not found",
-                "Could not find `cargo` on PATH. Install Rust (rustup) and try again.",
-            )
-            return
-
-        try:
-            cmd = build_cargo_command(level)
-        except ValueError as exc:
-            QMessageBox.critical(self, "Build for level", str(exc))
-            return
-
-        # Compose the visible command so the user sees the exact flags and
-        # the matching CARGO_TARGET_DIR (mirrors .github/workflows/build.yml).
-        target_cpu = microarch_target_cpu(level)
-        target_dir = microarch_target_dir(level)
-        env_prefix = ""
-        if target_dir:
-            env_prefix = f"CARGO_TARGET_DIR={shlex.quote(target_dir)} "
-        env_prefix += f"RUSTFLAGS={shlex.quote(f'-C target-cpu={target_cpu}')} "
-        joined = env_prefix + _shell_join_platform(cmd)
-
-        working_directory = Path(__file__).resolve().parent
-        # Propagate the level-specific env into a child terminal.
-        env_payload = "\n".join(
-            f"export {key}={shlex.quote(value)}"
-            for key, value in (
-                ("CARGO_TARGET_DIR", target_dir) if target_dir else (),
-                ("RUSTFLAGS", f"-C target-cpu={target_cpu}"),
-            )
-        )
-        shell_command = (
-            f"echo '[decode-launcher] building tape-decode at {level}...'; "
-            f"echo '[decode-launcher] {joined}'; "
-        )
-        if env_payload:
-            shell_command += f"{env_payload}; "
-        shell_command += _shell_join_platform(cmd) + "; "
-        shell_command += (
-            "status=$?; "
-            "echo; "
-            "echo '[decode-launcher] cargo finished with exit code $status'; "
-            f"exec {shlex.quote(os.environ.get('SHELL', '/bin/bash'))} -l"
-        )
-
-        try:
-            _open_terminal(["bash", "-lc", shell_command], working_directory)
-        except Exception as exc:
-            QMessageBox.critical(self, "Build for level", str(exc))
-            return
-
-        # Mirror what the terminal will execute in the in-window preview so the
-        # user immediately sees both the cargo command and the resolved binary
-        # location (before / after build, depending on disk state).
-        self._refresh_tool_state()
-
     def _locate_level_binary(self) -> None:
         level = self._selected_microarch_level()
         try:
@@ -967,7 +870,7 @@ class DecodeLauncherWindow(QWidget):
                 "Binary location",
                 f"No tape-decode binary found for level {level or 'Auto'}.\n\n"
                 f"{exc}\n\n"
-                "Click 'Build level…' to compile one for this host, or pick Auto.",
+                "Use the x86-64 microarch level selector to pick Auto, or build the binary for the chosen level outside the launcher.",
             )
             return
         path = prefix[0] if prefix else ""

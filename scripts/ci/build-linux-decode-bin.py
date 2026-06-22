@@ -84,6 +84,8 @@ def main() -> None:
         "decode_runtime",
         "--add-binary",
         f"{tape_decode_bin}{_platform_sep()}.",
+        "--add-data",
+        f"crates/tape-decode-cli/src/profiles/profiles.json{_platform_sep()}.",
         "--onefile",
         "--windowed",
         "--name",

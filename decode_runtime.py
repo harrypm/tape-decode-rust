@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
+# Note: sys is already imported above; used for _MEIPASS and executable path discovery.
+
 
 # x86-64 microarchitecture levels, ordered lowest to highest. These map directly
 # to the Rust `-C target-cpu` values for x86_64, and to the artifact directory
@@ -308,16 +310,39 @@ def list_profiles(timeout_seconds: int = 20) -> list[str]:
 
 
 def fallback_profiles_from_repo() -> list[str]:
-    profiles_json = _repo_root() / "crates" / "tape-decode-cli" / "src" / "profiles" / "profiles.json"
-    if not profiles_json.is_file():
-        return []
-    try:
-        data = json.loads(profiles_json.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return []
-    if not isinstance(data, dict):
-        return []
-    return sorted(name for name in data.keys() if isinstance(name, str))
+    # Search order:
+    # 1) Inside a PyInstaller bundle (_MEIPASS)
+    # 2) Next to the running executable (bundle root or bin/)
+    # 3) In the source tree (dev runs)
+    candidates: list[Path] = []
+
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        candidates.append(Path(meipass) / "profiles.json")
+
+    exe_dir = Path(sys.executable).resolve(strict=False).parent
+    candidates.extend(
+        [
+            exe_dir / "profiles.json",
+            exe_dir / "bin" / "profiles.json",
+            exe_dir / ".." / "profiles.json",
+        ]
+    )
+
+    # Dev / source tree layout
+    candidates.append(
+        _repo_root() / "crates" / "tape-decode-cli" / "src" / "profiles" / "profiles.json"
+    )
+
+    for profiles_json in candidates:
+        if profiles_json.is_file():
+            try:
+                data = json.loads(profiles_json.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return sorted(name for name in data.keys() if isinstance(name, str))
+            except (json.JSONDecodeError, OSError):
+                pass
+    return []
 
 
 def load_profiles() -> list[str]:
