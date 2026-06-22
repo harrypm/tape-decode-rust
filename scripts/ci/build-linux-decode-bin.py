@@ -78,6 +78,8 @@ def main() -> None:
         "decode.py",
         "--collect-all",
         "PyQt6",
+        "--collect-all",
+        "PyQt6-Qt6",
         "--hidden-import",
         "decode_launcher",
         "--hidden-import",
@@ -99,6 +101,18 @@ def main() -> None:
         "--name",
         "decode-rust-gui",
     ]
+
+    # Explicitly ensure Qt platform plugins (especially libqxcb.so) are inside the bundle
+    # so that setting QT_QPA_PLATFORM_PLUGIN_PATH at runtime can find them.
+    try:
+        import PyQt6  # type: ignore
+        qt_root = os.path.join(os.path.dirname(PyQt6.__file__), "Qt6")
+        plugins_dir = os.path.join(qt_root, "plugins")
+        if os.path.isdir(plugins_dir):
+            pyi_args += ["--add-data", f"{plugins_dir}{_platform_sep()}PyQt6/Qt6/plugins"]
+            print(f"Adding Qt plugins from {plugins_dir}")
+    except Exception as exc:
+        print(f"Could not locate PyQt6 Qt plugins for collection: {exc}")
 
     for src, dest in _discover_level_binaries():
         print(f"Bundling level binary {src} -> {dest}")

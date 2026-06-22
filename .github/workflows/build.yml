@@ -80,6 +80,28 @@ jobs:
           ls -la target-x86-64-v*/x86_64-pc-windows-msvc/release/tape-decode.exe 2>/dev/null || true
           ls -la target/x86_64-pc-windows-msvc/release/tape-decode.exe 2>/dev/null || true
 
+      - name: Test Rust core
+        shell: bash
+        run: cargo test --workspace --release
+
+      - name: Smoke test raw tape-decode binary (Windows)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Prefer a level binary (lowest first) so it runs on any x86-64 host
+          BIN=""
+          for lvl in v1 v2 v3 v4; do
+            p="target-x86-64-${lvl}/x86_64-pc-windows-msvc/release/tape-decode.exe"
+            if [ -f "$p" ]; then BIN="$p"; break; fi
+          done
+          if [ -z "$BIN" ]; then BIN="target/x86_64-pc-windows-msvc/release/tape-decode.exe"; fi
+          if [ ! -f "$BIN" ]; then
+            echo "No tape-decode.exe found for smoke test"; ls -la target*/x86_64-pc-windows-msvc/release/ || true; exit 1
+          fi
+          echo "Smoking: $BIN"
+          TAPE_DECODE_MICROARCH=x86-64-v1 "$BIN" list-profiles | tee /tmp/tape_decode_profiles.txt
+          grep -q "PAL_VHS" /tmp/tape_decode_profiles.txt
+
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -188,10 +210,51 @@ jobs:
             build_level "$level"
           done
 
+      - name: Test Rust core
+        run: cargo test --workspace --release
+
+      - name: Smoke test raw tape-decode binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
+            BIN=""
+            for lvl in v1 v2 v3 v4; do
+              p="target-x86-64-${lvl}/x86_64-unknown-linux-gnu/release/tape-decode"
+              if [ -f "$p" ]; then BIN="$p"; break; fi
+            done
+            if [ -z "$BIN" ]; then BIN="target/x86_64-unknown-linux-gnu/release/tape-decode"; fi
+            if [ ! -f "$BIN" ]; then
+              echo "No tape-decode binary found for smoke"; ls -la target*/x86_64-unknown-linux-gnu/release/ || true; exit 1
+            fi
+            echo "Smoking: $BIN"
+            TAPE_DECODE_MICROARCH=x86-64-v1 "$BIN" list-profiles | tee /tmp/tape_decode_profiles.txt
+            grep -q "PAL_VHS" /tmp/tape_decode_profiles.txt
+          else
+            BIN="target/aarch64-unknown-linux-gnu/release/tape-decode"
+            if [ ! -f "$BIN" ]; then
+              echo "No tape-decode binary found for smoke"; ls -la target/aarch64-unknown-linux-gnu/release/ || true; exit 1
+            fi
+            echo "Smoking: $BIN"
+            "$BIN" list-profiles | tee /tmp/tape_decode_profiles.txt
+            grep -q "PAL_VHS" /tmp/tape_decode_profiles.txt
+          fi
+
       - name: Setup Python (for decode launcher)
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+
+      - name: Install system libraries needed for complete PyQt6 xcb plugin collection
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libxcb-cursor0 \
+            libxkbcommon-x11-0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render0 libxcb-render-util0 libxcb-shape0 libxcb-shm0 \
+            libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1 \
+            libxkbcommon0 || true
 
       - name: Install launcher packaging dependencies
         run: |
@@ -280,7 +343,7 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            runner: macos-15-intel
+            runner: macos-13
             target: x86_64-apple-darwin
             artifact_suffix: x86_64
           - arch: arm64
@@ -340,6 +403,36 @@ jobs:
             build_level "$level"
           done
 
+      - name: Test Rust core
+        run: cargo test --workspace --release
+
+      - name: Smoke test raw tape-decode binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
+            BIN=""
+            for lvl in v1 v2 v3 v4; do
+              p="target-x86-64-${lvl}/x86_64-apple-darwin/release/tape-decode"
+              if [ -f "$p" ]; then BIN="$p"; break; fi
+            done
+            if [ -z "$BIN" ]; then BIN="target/x86_64-apple-darwin/release/tape-decode"; fi
+            if [ ! -f "$BIN" ]; then
+              echo "No tape-decode binary found for smoke"; ls -la target*/x86_64-apple-darwin/release/ || true; exit 1
+            fi
+            echo "Smoking: $BIN"
+            TAPE_DECODE_MICROARCH=x86-64-v1 "$BIN" list-profiles | tee /tmp/tape_decode_profiles.txt
+            grep -q "PAL_VHS" /tmp/tape_decode_profiles.txt
+          else
+            BIN="target/aarch64-apple-darwin/release/tape-decode"
+            if [ ! -f "$BIN" ]; then
+              echo "No tape-decode binary found for smoke"; ls -la target/aarch64-apple-darwin/release/ || true; exit 1
+            fi
+            echo "Smoking: $BIN"
+            "$BIN" list-profiles | tee /tmp/tape_decode_profiles.txt
+            grep -q "PAL_VHS" /tmp/tape_decode_profiles.txt
+          fi
+
       - name: Setup Python (for decode launcher)
         uses: actions/setup-python@v6
         with:
@@ -359,6 +452,9 @@ jobs:
       - name: Build launcher binary (with microarch levels)
         if: matrix.arch == 'x86_64'
         run: python3 scripts/ci/build-macos-decode-bin.py
+
+      - name: Ad-hoc sign app bundle
+        run: codesign -s - --deep --force dist/decode-rust-gui.app
 
       - name: Package decode-rust-gui macOS DMG
         env:

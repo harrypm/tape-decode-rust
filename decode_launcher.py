@@ -11,6 +11,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+# Ensure Qt platform plugins (xcb/cocoa/...) are discoverable inside
+# PyInstaller onefile bundles (critical for Linux AppImage GUI launch).
+# This must run BEFORE any PyQt6 import.
+if getattr(sys, "frozen", False):
+    _base = getattr(sys, "_MEIPASS", None) or os.path.dirname(sys.executable)
+    if _base:
+        for _rel in (
+            os.path.join("PyQt6", "Qt6", "plugins"),
+            os.path.join("PyQt6", "Qt", "plugins"),
+            "plugins",
+        ):
+            _plug = os.path.join(_base, _rel)
+            if os.path.isdir(os.path.join(_plug, "platforms")):
+                os.environ.setdefault(
+                    "QT_QPA_PLATFORM_PLUGIN_PATH", os.path.join(_plug, "platforms")
+                )
+                os.environ.setdefault("QT_PLUGIN_PATH", _plug)
+                break
+
+
 from decode_runtime import (
     MICROARCH_AUTO,
     MICROARCH_LEVELS,

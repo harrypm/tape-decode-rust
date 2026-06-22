@@ -1,3 +1,26 @@
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
+
+# Help PyQt6 locate its platform plugins inside the AppImage / onefile extraction.
+# PyInstaller collects them under PyQt6/Qt6/plugins when using --collect-all.
+for candidate in \
+  "${HERE}/PyQt6/Qt6/plugins" \
+  "${HERE}/usr/bin/PyQt6/Qt6/plugins" \
+  "${HERE}/usr/lib/PyQt6/Qt6/plugins" \
+  "${HERE}/plugins" ;
+do
+  if [ -d "$candidate/platforms" ]; then
+    export QT_QPA_PLATFORM_PLUGIN_PATH="$candidate/platforms:${QT_QPA_PLATFORM_PLUGIN_PATH:-}"
+    export QT_PLUGIN_PATH="$candidate:${QT_PLUGIN_PATH:-}"
+    break
+  fi
+done
+
+# Prefer xcb on X11 systems; fall back to auto (wayland/xcb) if needed.
+if [ -z "${QT_QPA_PLATFORM:-}" ]; then
+  if [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    : # let Qt auto-detect, but ensure xcb is available via plugin path above
+  fi
+fi
+
 exec "${HERE}/usr/bin/decode-rust-gui" "$@"
