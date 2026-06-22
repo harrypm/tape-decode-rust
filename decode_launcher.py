@@ -33,6 +33,7 @@ try:
         QFileDialog,
         QGridLayout,
         QGroupBox,
+        QHBoxLayout,
         QLabel,
         QLineEdit,
         QMessageBox,
