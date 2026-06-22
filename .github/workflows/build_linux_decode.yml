@@ -136,15 +136,12 @@ jobs:
           cp resources/appimage/AppRun AppDir/AppRun
           chmod +x AppDir/AppRun
 
-          python3 - <<'PY'
-          import base64
-          from pathlib import Path
-          icon = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO0N6xQAAAAASUVORK5CYII=")
-          Path("AppDir/usr/share/icons/hicolor/256x256/apps/decode-light.png").write_bytes(icon)
-          PY
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          cp resources/icon/tape-decode-rust-256.png AppDir/usr/share/icons/hicolor/256x256/apps/decode-light.png
+          cp resources/icon/tape-decode-rust-256.png AppDir/decode-light.png
 
           ln -sf usr/share/applications/decode-light.desktop AppDir/decode-light.desktop
-          ln -sf usr/share/icons/hicolor/256x256/apps/decode-light.png AppDir/decode-light.png
+          ln -sf decode-light.png AppDir/decode-light.png
 
           APPIMAGE_TOOL="${{ matrix.appimagetool }}"
           APPIMAGE_NAME="linux_decode-light_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.AppImage"

@@ -86,6 +86,8 @@ def main() -> None:
         f"{tape_decode_bin};.",
         "--add-data",
         f"crates\\tape-decode-cli\\src\\profiles\\profiles.json;.",
+        "--icon",
+        "resources\\icon\\tape-decode-rust.ico",
         "--onefile",
         "--windowed",
         "--name",
