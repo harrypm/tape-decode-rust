@@ -151,7 +151,6 @@ jobs:
           ln -sf decode-light.png AppDir/.DirIcon 2>/dev/null || cp AppDir/decode-light.png AppDir/.DirIcon || true
 
           ln -sf usr/share/applications/decode-light.desktop AppDir/decode-light.desktop
-          ln -sf decode-light.png AppDir/decode-light.png
 
           APPIMAGE_TOOL="${{ matrix.appimagetool }}"
           APPIMAGE_NAME="linux_decode-light_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.AppImage"

@@ -282,20 +282,19 @@ jobs:
           chmod +x AppDir/AppRun
 
           cp resources/icon/tape-decode-rust-256.png AppDir/usr/share/icons/hicolor/256x256/apps/decode-light.png || true
-          cp resources/icon/tape-decode-rust-256.png AppDir/decode-light.png || true
+          cp resources/icon/tape-decode-rust-256.png AppDir/decode-light.png
 
           # Stage icon resources tree so launcher runtime can discover PNG for setWindowIcon/taskbar
           mkdir -p AppDir/resources/icon
           cp resources/icon/tape-decode-rust-256.png AppDir/resources/icon/ || true
           cp resources/icon/tape-decode-rust-256.png AppDir/tape-decode-rust-256.png || true
-          cp resources/icon/tape-decode-rust-256.png AppDir/decode-light.png || true
+          cp resources/icon/tape-decode-rust-256.png AppDir/decode-light.png
 
           # .DirIcon for better taskbar / file manager icon for the AppImage
           cp resources/icon/tape-decode-rust-256.png AppDir/.DirIcon || true
           ln -sf decode-light.png AppDir/.DirIcon 2>/dev/null || cp AppDir/decode-light.png AppDir/.DirIcon || true
 
           ln -sf usr/share/applications/decode-light.desktop AppDir/decode-light.desktop
-          ln -sf decode-light.png AppDir/decode-light.png
 
           APPIMAGE_TOOL=appimagetool-x86_64.AppImage
           APPIMAGE_NAME="linux_decode-light_${BUILD_VERSION}_x86_64.AppImage"
