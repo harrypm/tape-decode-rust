@@ -25,7 +25,7 @@ from decode_runtime import (
 
 try:
     from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
-    from PyQt6.QtGui import QColor, QPalette
+    from PyQt6.QtGui import QColor, QIcon, QPalette
     from PyQt6.QtWidgets import (
         QApplication,
         QCheckBox,
@@ -166,6 +166,69 @@ def _shell_join_windows(parts: list[str]) -> str:
 
 def _shell_join_platform(parts: list[str]) -> str:
     return _shell_join_windows(parts) if os.name == "nt" else _shell_join(parts)
+
+def _resolve_icon_path() -> Optional[Path]:
+    """Find a suitable icon PNG for the window/taskbar icon.
+
+    Works in source tree, onefile PyInstaller bundles (_MEIPASS), next to the
+    executable, and inside AppImages (checks typical hicolor locations).
+    """
+    candidates: list[Path] = []
+
+    # PyInstaller onefile bundle
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        mp = Path(meipass)
+        candidates.extend([
+            mp / "resources" / "icon" / "tape-decode-rust-256.png",
+            mp / "tape-decode-rust-256.png",
+            mp / "decode-light.png",
+        ])
+
+    # Next to the frozen executable (AppImage mount, extracted, or onefile dir)
+    if getattr(sys, "frozen", False) or meipass:
+        try:
+            exe_dir = Path(sys.executable).resolve().parent
+            candidates.extend([
+                exe_dir / "resources" / "icon" / "tape-decode-rust-256.png",
+                exe_dir / "tape-decode-rust-256.png",
+                exe_dir / "decode-light.png",
+            ])
+            # AppImage mount layout: exe at <mount>/usr/bin/decode-light
+            # hicolor and .DirIcon live at <mount>/usr/share/... and <mount>/.DirIcon
+            mount_root = exe_dir.parent  # <mount>/usr
+            candidates.append(mount_root / "share" / "icons" / "hicolor" / "256x256" / "apps" / "decode-light.png")
+            candidates.append(mount_root.parent / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps" / "decode-light.png")
+            # Walk up a few levels to find AppDir root or mount root (robustness)
+            p = exe_dir
+            for _ in range(6):
+                candidates.append(p / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps" / "decode-light.png")
+                candidates.append(p / ".DirIcon")
+                candidates.append(p / "decode-light.png")
+                if (p / ".DirIcon").exists() or (p / "usr" / "share").exists():
+                    break
+                p = p.parent
+        except Exception:
+            pass
+
+    # Source tree (development)
+    try:
+        here = Path(__file__).resolve().parent
+        candidates.extend([
+            here / "resources" / "icon" / "tape-decode-rust-256.png",
+            here.parent / "resources" / "icon" / "tape-decode-rust-256.png",
+            Path.cwd() / "resources" / "icon" / "tape-decode-rust-256.png",
+        ])
+    except Exception:
+        pass
+
+    for c in candidates:
+        try:
+            if c and c.is_file():
+                return c.resolve()
+        except Exception:
+            continue
+    return None
 
 
 def _open_linux_terminal(shell_command: str) -> None:
@@ -991,6 +1054,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     app = QApplication(sys.argv)
     _apply_fusion_dark_mode(app)
     window = DecodeLauncherWindow()
+
+    # Set window + app icon for taskbar/dock/titlebar on all platforms.
+    # This is especially important for Linux AppImage/taskbar integration.
+    icon_path = _resolve_icon_path()
+    if icon_path:
+        try:
+            ico = QIcon(str(icon_path))
+            app.setWindowIcon(ico)
+            window.setWindowIcon(ico)
+        except Exception:
+            pass
+
     window.show()
     return app.exec()
 

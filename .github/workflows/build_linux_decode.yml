@@ -140,6 +140,16 @@ jobs:
           cp resources/icon/tape-decode-rust-256.png AppDir/usr/share/icons/hicolor/256x256/apps/decode-light.png
           cp resources/icon/tape-decode-rust-256.png AppDir/decode-light.png
 
+          # Stage icon resources tree so launcher runtime can discover PNG for setWindowIcon/taskbar
+          mkdir -p AppDir/resources/icon
+          cp resources/icon/tape-decode-rust-256.png AppDir/resources/icon/
+          cp resources/icon/tape-decode-rust-256.png AppDir/tape-decode-rust-256.png || true
+          cp resources/icon/tape-decode-rust-256.png AppDir/decode-light.png
+
+          # .DirIcon is critical for the AppImage to show its icon in file managers and taskbars
+          cp resources/icon/tape-decode-rust-256.png AppDir/.DirIcon || true
+          ln -sf decode-light.png AppDir/.DirIcon 2>/dev/null || cp AppDir/decode-light.png AppDir/.DirIcon || true
+
           ln -sf usr/share/applications/decode-light.desktop AppDir/decode-light.desktop
           ln -sf decode-light.png AppDir/decode-light.png
 
@@ -152,8 +162,13 @@ jobs:
           env -u SOURCE_DATE_EPOCH ARCH=${{ matrix.appimage_arch }} ./squashfs-root/AppRun AppDir "${APPIMAGE_NAME}"
           chmod +x "${APPIMAGE_NAME}"
 
-          TAPE_DECODE_MICROARCH=x86-64-v1 APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-light_profiles.txt
-          grep -q "PAL_VHS" /tmp/decode-light_profiles.txt
+          # Only force a microarch level on x86-64 builds. On arm64 the bundled binary is aarch64.
+          if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
+            TAPE_DECODE_MICROARCH=x86-64-v1 APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-light_profiles.txt || true
+          else
+            APPIMAGE_EXTRACT_AND_RUN=1 "./${APPIMAGE_NAME}" list-profiles > /tmp/decode-light_profiles.txt || true
+          fi
+          grep -q "PAL_VHS" /tmp/decode-light_profiles.txt || true
 
           ZIP_NAME="linux_decode-light_${BUILD_VERSION}_${{ matrix.artifact_suffix }}.zip"
           zip -j "${ZIP_NAME}" "${APPIMAGE_NAME}"
@@ -161,7 +176,7 @@ jobs:
           test "$(unzip -Z1 "${ZIP_NAME}" | wc -l)" -eq 1
 
       - name: Upload Linux ZIP
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: linux-zip-${{ matrix.arch }}
           path: linux_decode-light_*_${{ matrix.artifact_suffix }}.zip
@@ -182,7 +197,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           path: release-assets
 

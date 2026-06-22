@@ -86,6 +86,13 @@ def main() -> None:
         f"{tape_decode_bin}{_platform_sep()}.",
         "--add-data",
         f"crates/tape-decode-cli/src/profiles/profiles.json{_platform_sep()}.",
+        # Bundle icon PNG so _resolve_icon_path / setWindowIcon can find it inside onefile for dock/taskbar
+        "--add-data",
+        f"resources/icon/tape-decode-rust-256.png{_platform_sep()}resources/icon/tape-decode-rust-256.png",
+        "--add-data",
+        f"resources/icon/tape-decode-rust-256.png{_platform_sep()}tape-decode-rust-256.png",
+        "--add-data",
+        f"resources/icon/tape-decode-rust-256.png{_platform_sep()}decode-light.png",
         "--icon",
         "resources/icon/tape-decode-rust.icns",
         "--onefile",

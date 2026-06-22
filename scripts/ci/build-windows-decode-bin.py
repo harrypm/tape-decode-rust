@@ -86,6 +86,13 @@ def main() -> None:
         f"{tape_decode_bin};.",
         "--add-data",
         f"crates\\tape-decode-cli\\src\\profiles\\profiles.json;.",
+        # Bundle icon PNG so _resolve_icon_path / setWindowIcon can find it inside onefile for taskbar
+        "--add-data",
+        f"resources\\icon\\tape-decode-rust-256.png;resources\\icon\\tape-decode-rust-256.png",
+        "--add-data",
+        f"resources\\icon\\tape-decode-rust-256.png;tape-decode-rust-256.png",
+        "--add-data",
+        f"resources\\icon\\tape-decode-rust-256.png;decode-light.png",
         "--icon",
         "resources\\icon\\tape-decode-rust.ico",
         "--onefile",
