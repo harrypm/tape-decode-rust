@@ -136,9 +136,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          mkdir -p AppDir/usr/bin
-          mkdir -p AppDir/usr/share/applications
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          rm -rf AppDir squashfs-root
+          mkdir -p AppDir/usr/bin \
+            AppDir/usr/share/applications \
+            AppDir/usr/share/icons/hicolor/256x256/apps \
+            AppDir/resources/icon
 
           cp dist/decode-rust-gui AppDir/usr/bin/decode-rust-gui
           chmod +x AppDir/usr/bin/decode-rust-gui
@@ -147,19 +149,13 @@ jobs:
           cp resources/appimage/AppRun AppDir/AppRun
           chmod +x AppDir/AppRun
 
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
           cp resources/icon/tape-decode-rust-256.png AppDir/usr/share/icons/hicolor/256x256/apps/decode-rust-gui.png
-          cp resources/icon/tape-decode-rust-256.png AppDir/decode-rust-gui.png
 
-          # Stage icon resources tree so launcher runtime can discover PNG for setWindowIcon/taskbar
-          mkdir -p AppDir/resources/icon
-          cp resources/icon/tape-decode-rust-256.png AppDir/resources/icon/
-          cp resources/icon/tape-decode-rust-256.png AppDir/tape-decode-rust-256.png || true
-          cp resources/icon/tape-decode-rust-256.png AppDir/decode-rust-gui.png
-
-          # .DirIcon is critical for the AppImage to show its icon in file managers and taskbars
-          cp resources/icon/tape-decode-rust-256.png AppDir/.DirIcon || true
-          ln -sf decode-rust-gui.png AppDir/.DirIcon 2>/dev/null || cp AppDir/decode-rust-gui.png AppDir/.DirIcon || true
+          # Keep one canonical icon file and expose required aliases via symlink to avoid duplicate payload files.
+          ln -sf usr/share/icons/hicolor/256x256/apps/decode-rust-gui.png AppDir/decode-rust-gui.png
+          ln -sf decode-rust-gui.png AppDir/.DirIcon
+          ln -sf ../../decode-rust-gui.png AppDir/resources/icon/tape-decode-rust-256.png
+          ln -sf decode-rust-gui.png AppDir/tape-decode-rust-256.png
 
           ln -sf usr/share/applications/decode-rust-gui.desktop AppDir/decode-rust-gui.desktop
 
